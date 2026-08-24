@@ -1,5 +1,5 @@
 export { BorosSession } from './session.js'
-export type { BorosSessionOptions, BorosMarketSummary, MakerCampaign, MakerCampaignSide } from './session.js'
+export type { BorosSessionOptions, BorosMarketSummary, MakerCampaign, MakerCampaignSide, BorosSide, BorosMarketQuote, BorosBook, BorosBookLevel, BorosOpenOrder, BorosPosition } from './session.js'
 export { BorosRatesAccount } from './account.js'
 export { PendleMarketSession, PendleMarketAccount } from './market.js'
 export type { PendleValuation } from './market.js'

@@ -1,5 +1,5 @@
 import { OwAccount } from '@openwhaleorg/core'
-import type { BorosSession } from './session.js'
+import type { BorosSession, BorosOpenOrder, BorosPosition, BorosMarketQuote } from './session.js'
 
 /**
  * Read-only view of a Boros account — the 'pendle/rates' kind's canonical
@@ -46,5 +46,22 @@ export class BorosRatesAccount {
   /** Agent approval expiry (epoch seconds) — 0/past means trading is dead. */
   async agentExpiry(): Promise<number> {
     return this.session.agentExpiry()
+  }
+
+  /** Per-market reads a maker strategy lives on. */
+  openOrders(marketId: number, tokenId: number): Promise<BorosOpenOrder[]> {
+    return this.session.openOrders(marketId, tokenId)
+  }
+
+  position(marketId: number, tokenId: number): Promise<BorosPosition | undefined> {
+    return this.session.position(marketId, tokenId)
+  }
+
+  gasBalance(): Promise<number> {
+    return this.session.gasBalance()
+  }
+
+  quote(marketId: number): Promise<BorosMarketQuote> {
+    return this.session.marketQuote(marketId)
   }
 }
