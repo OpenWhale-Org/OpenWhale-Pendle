@@ -134,6 +134,26 @@ export class BorosSession {
     }))
   }
 
+  /**
+   * Market catalogue in the dashboard picker's shape (duck-typed
+   * fetchMarkets(), like exchange venues). One row per live whitelisted
+   * market; `symbol` is Boros's own market symbol and doubles as the
+   * strategy/monitor key.
+   */
+  async fetchMarkets(): Promise<Array<{ symbol: string; base: string; quote: string; type: 'swap'; active: boolean; marketId: number; tokenId: number; maturity: number }>> {
+    const markets = await this.listLiveMarkets()
+    return markets.map(m => ({
+      symbol: m.symbol,
+      base: m.symbol.split('-')[1] ?? m.symbol,
+      quote: m.platform,
+      type: 'swap' as const,
+      active: true,
+      marketId: m.marketId,
+      tokenId: m.tokenId,
+      maturity: m.maturity,
+    }))
+  }
+
   async makerCampaign(marketId: number): Promise<MakerCampaign> {
     return (await this.api.miscellaneous.incentivesControllerGetMakerIncentiveCampaign(marketId)).data as MakerCampaign
   }

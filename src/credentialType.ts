@@ -21,6 +21,7 @@ export const borosAgentCredentialType: CredentialTypeDefinition = {
     accountId: z.coerce.number().int().min(0).default(0).meta({ displayName: 'Sub-account Id' }),
   }),
   raw: true,
+  managed: true,
   test: async (data: RawCredentialData) => {
     const key = String(data['agentPrivateKey'] ?? '')
     privateKeyToAccount((key.startsWith('0x') ? key : `0x${key}`) as `0x${string}`)
