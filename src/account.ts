@@ -2,14 +2,14 @@ import { OwAccount } from '@openwhaleorg/core'
 import type { BorosSession } from './session.js'
 
 /**
- * Read-only view of a Boros account — the 'boros/rates' kind's canonical
+ * Read-only view of a Boros account — the 'pendle/rates' kind's canonical
  * Reader. v0 surfaces what needs no API signing key: entered markets, per-
  * market positions via contract reads, the USD gas balance (the requote
  * loop's fuel gauge), and the agent approval's expiry.
  */
-@OwAccount({ id: 'rates-account', kind: 'boros/rates', venue: 'boros', displayName: 'Boros Account' })
+@OwAccount({ id: 'boros-account', kind: 'pendle/rates', venue: 'boros', displayName: 'Boros Account' })
 export class BorosRatesAccount {
-  static readonly kind = 'boros/rates' as const
+  static readonly kind = 'pendle/rates' as const
   static readonly venueType = 'boros'
 
   constructor(

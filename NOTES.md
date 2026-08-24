@@ -1,4 +1,4 @@
-# Boros maker-reward findings (2026-08-24 probe)
+# Pendle plugin — Boros maker-reward findings (2026-08-24 probe)
 
 ## Reward structure (from /v1/incentives/maker-incentives/campaigns/{marketId})
 

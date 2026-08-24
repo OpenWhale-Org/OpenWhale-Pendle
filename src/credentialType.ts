@@ -1,17 +1,18 @@
 import { z } from 'zod'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { CredentialTypeDefinition, RawCredentialData } from '@openwhaleorg/core'
+import { PENDLE_LOGO } from './brand.js'
 
 /**
  * The Boros AGENT credential — the hot key. Signs order placement/cancel only;
  * it cannot withdraw and holds no funds, so losing it costs one re-approval
  * from the root wallet (which lives separately, as 'web3/evm').
- * Created by the boros/setup-agent script, not by hand.
+ * Created by the pendle/setup-agent script, not by hand.
  */
 export const borosAgentCredentialType: CredentialTypeDefinition = {
-  type: 'boros/agent',
+  type: 'pendle/boros-agent',
   displayName: 'Boros Agent',
-  category: 'Web3',
+  logo: PENDLE_LOGO,
   icon: '🤖',
   description: 'Delegated trading key for Boros — orders only, no withdrawals. Root wallet stays cold.',
   schema: z.object({

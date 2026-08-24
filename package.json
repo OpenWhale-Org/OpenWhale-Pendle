@@ -1,8 +1,8 @@
 {
-  "name": "@jarei/openwhale-boros",
+  "name": "@jarei/openwhale-pendle",
   "version": "0.1.0",
   "private": true,
-  "description": "Boros venue plugin for OpenWhale (boros/rates kind) \u2014 lives OUTSIDE the framework repo on purpose",
+  "description": "Pendle venue plugin for OpenWhale \u2014 Pendle V2 (PT/YT) + Boros (IRS) under one roof; lives OUTSIDE the framework repo on purpose",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
-    "build:plugin": "pnpm build && esbuild src/plugin.ts --bundle --format=esm --platform=node --target=es2022 --external:@openwhaleorg/core --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\" --outfile=dist/boros.plugin.mjs",
+    "build:plugin": "pnpm build && esbuild src/plugin.ts --bundle --format=esm --platform=node --target=es2022 --external:@openwhaleorg/core --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\" --outfile=dist/pendle.plugin.mjs",
     "probe": "npx tsx --env-file=.env scripts/probe.ts"
   },
   "dependencies": {

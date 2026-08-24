@@ -12,7 +12,7 @@ function normalizeKey(key: string): `0x${string}` {
 }
 
 /**
- * boros/setup-agent — the one-time onboarding: generate a fresh agent keypair,
+ * pendle/setup-agent — the one-time onboarding: generate a fresh agent keypair,
  * approve it with the ROOT wallet (read from the chosen web3/evm credential,
  * used for one EIP-712 signature relayed through the Boros API — no on-chain
  * gas from the wallet), then store the agent as a 'boros/agent' credential.
@@ -58,7 +58,7 @@ export function setupAgentScript(credentials: CredentialStore): ScriptDefinition
       emit?.(`approved — expiry on-record: ${new Date(confirmedExpiry * 1000).toISOString()}`)
 
       const name = String(params['credentialName'])
-      await credentials.set(name, 'boros/agent', {
+      await credentials.set(name, 'pendle/boros-agent', {
         rootAddress: rootAccount.address,
         agentPrivateKey,
         accountId,
@@ -69,7 +69,7 @@ export function setupAgentScript(credentials: CredentialStore): ScriptDefinition
           `  root:     ${rootAccount.address}`,
           `  agent:    ${agentAddress}`,
           `  expiry:   ${new Date(confirmedExpiry * 1000).toISOString()}`,
-          `  stored:   credential "${name}" (boros/agent)`,
+          `  stored:   credential "${name}" (pendle/boros-agent)`,
           ``,
           `Next: create a Boros Account on the Accounts page binding "${name}".`,
         ].join('\n'),
@@ -79,7 +79,7 @@ export function setupAgentScript(credentials: CredentialStore): ScriptDefinition
   }
 }
 
-/** boros/scan-incentives — the live maker-budget scan, as a dashboard script. */
+/** pendle/scan-incentives — the live maker-budget scan, as a dashboard script. */
 export const scanIncentivesScript: ScriptDefinition = {
   id: 'scan-incentives',
   name: 'Scan maker incentives',
