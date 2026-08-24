@@ -1,0 +1,35 @@
+{
+  "name": "@jarei/openwhale-boros",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boros venue plugin for OpenWhale (boros/rates kind) — lives OUTSIDE the framework repo on purpose",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist",
+    "build:plugin": "pnpm build && esbuild src/plugin.ts --bundle --format=esm --platform=node --external:@openwhaleorg/core --external:@openwhaleorg/web3 --outfile=dist/boros.plugin.mjs",
+    "probe": "npx tsx --env-file=.env scripts/probe.ts"
+  },
+  "dependencies": {
+    "zod": "4.4.1",
+    "@pendle/boros-sdk-public": "^0.3.1",
+    "@openwhaleorg/core": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core",
+    "@openwhaleorg/web3": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/web3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.19.2",
+    "typescript": "5.4.5",
+    "vitest": "^1.6.0"
+  }
+}
