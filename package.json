@@ -1,0 +1,30 @@
+{
+  "name": "@jarei/openwhale-pendle-maker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boros maker-reward strategy for OpenWhale — rests post-only orders at the incentive band's far edge; lives OUTSIDE the framework repo on purpose",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "zod": "4.4.1",
+    "@openwhaleorg/core": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core",
+    "@jarei/openwhale-pendle": "link:../openwhale-pendle"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

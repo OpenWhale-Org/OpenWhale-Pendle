@@ -1,0 +1,76 @@
+import type { OpenWhalePlugin, PluginFactory } from '@openwhaleorg/core'
+import { MarketWatchMonitor, marketWatchParamsSchema } from './monitor/MarketWatchMonitor.js'
+import { MakerExecutor } from './executor/MakerExecutor.js'
+import { MakerStrategy } from './strategy/MakerStrategy.js'
+
+/**
+ * pendle-maker — the Boros maker-reward strategy package. Depends on the
+ * pendle venue plugin (kind 'pendle/rates', the agent credential, the
+ * BorosSession trading surface) and on nothing else venue-wise.
+ */
+export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
+  const now = new Date().toISOString()
+  return {
+    name: 'pendle-maker',
+    version: '0.1.0',
+    icon: '🎯',
+    readme: [
+      '# pendle-maker',
+      '',
+      'Farms Boros **maker incentives**: rests post-only orders at the far edge of each side\'s incentive band and follows the band as mid moves. Reward per hour = the side\'s budget × our share of in-band liquidity — the band is not distance-weighted, so the edge earns what the touch earns at a fraction of the fill risk.',
+      '',
+      '## Run it',
+      '- Have a **Boros Account** (see the pendle plugin\'s setup) with collateral deposited into the market you pick and a USD gas balance.',
+      '- Run **Scan maker incentives** and pick a market with a live budget and a small pool.',
+      '- Create a **market-watch** monitor instance keyed by that market id (or let the strategy subscribe to it).',
+      '- Create one strategy instance per market. It starts in **dry run** — it logs every cancel/place it would send. Switch dryRun off to go live.',
+      '',
+      '## Risk posture',
+      '- Both sides rest at `edgeRatio × range` from mid; re-quoted only when out of band or closer than `safeDistanceRatio × range`.',
+      '- A fill is an accident: the position is flattened with an IOC immediately, then quoting resumes.',
+      '- Quoting pauses below the gas floor. Deposits are never automated.',
+    ].join('\n'),
+    monitorImplementations: [
+      {
+        id: 'market-watch',
+        contract: 'market-watch',
+        displayName: 'Boros market watch',
+        description: 'One Boros market\'s maker picture every few seconds: mid/mark APR, the incentive band and budget per side, the pool we share it with, and the size already resting in band. Key: market id.',
+        params: marketWatchParamsSchema,
+        create: (ctx) => new MarketWatchMonitor(ctx),
+      },
+    ],
+    executors: [
+      {
+        definition: {
+          id: 'maker',
+          name: 'Boros Maker Executor',
+          description: 'Idempotent quote / cancel / flatten over one Boros account: quote re-reads resting orders on the side, cancels them, places one post-only order; flatten IOCs the opposite side after an accidental fill. simulate* variants log without sending.',
+          source: 'plugin',
+          pluginName: 'pendle-maker',
+          supportedActions: ['quote', 'cancel', 'flatten', 'simulateQuote', 'simulateCancel', 'simulateFlatten'],
+          createdAt: now,
+          updatedAt: now,
+        },
+        instance: new MakerExecutor(),
+      },
+    ],
+    strategies: [
+      {
+        definition: {
+          id: 'boros-maker',
+          name: 'Boros Maker Rewards',
+          description: '在 Boros 激励带最远边缘双边挂 post-only 单、实时跟随带移动吃 maker 奖励；被吃即刻平回中性；一实例一市场；默认模拟运行。',
+          source: 'plugin',
+          pluginName: 'pendle-maker',
+          accountRequirements: [{ label: 'boros', kind: 'pendle/rates' }],
+          createdAt: now,
+          updatedAt: now,
+        },
+        factory: () => new MakerStrategy(),
+      },
+    ],
+  }
+}
+
+export default pendleMakerPlugin
