@@ -17,6 +17,9 @@ importers:
       '@pendle/boros-sdk-public':
         specifier: ^0.3.1
         version: 0.3.1(@layerzerolabs/lz-evm-messagelib-v2@3.0.168(@axelar-network/axelar-gmp-sdk-solidity@5.10.0)(@chainlink/contracts-ccip@0.7.6(ethers@5.8.0))(@eth-optimism/contracts@0.6.0(ethers@5.8.0))(@layerzerolabs/lz-evm-protocol-v2@3.0.148(@openzeppelin/contracts-upgradeable@5.3.0(@openzeppelin/contracts@5.3.0))(@openzeppelin/contracts@5.3.0)(hardhat-deploy@0.12.4)(solidity-bytes-utils@0.8.4))(@layerzerolabs/lz-evm-v1-0.7@3.0.168(@openzeppelin/contracts-upgradeable@5.3.0(@openzeppelin/contracts@5.3.0))(@openzeppelin/contracts@5.3.0)(hardhat-deploy@0.12.4))(@openzeppelin/contracts-upgradeable@5.3.0(@openzeppelin/contracts@5.3.0))(@openzeppelin/contracts@5.3.0)(hardhat-deploy@0.12.4)(solidity-bytes-utils@0.8.4))(@layerzerolabs/lz-evm-v1-0.7@3.0.168(@openzeppelin/contracts-upgradeable@5.3.0(@openzeppelin/contracts@5.3.0))(@openzeppelin/contracts@5.3.0)(hardhat-deploy@0.12.4))(hardhat-deploy@0.12.4)(solidity-bytes-utils@0.8.4)(typescript@5.4.5)(zod@4.4.1)
+      viem:
+        specifier: 2.55.10
+        version: 2.55.10(typescript@5.4.5)(zod@4.4.1)
       zod:
         specifier: 4.4.1
         version: 4.4.1
