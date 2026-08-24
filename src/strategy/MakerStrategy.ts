@@ -55,9 +55,10 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   override readonly accounts = decls.accounts
 
   readonly baseParamsSchema = z.object({
-    marketId: z.number().int().positive().meta({
-      displayName: 'Boros market id',
-      description: 'One instance quotes one market. Run the pendle/scan-incentives script to pick a market with a live budget and a small pool.',
+    market: z.string().min(3).meta({
+      displayName: 'Boros market',
+      description: 'One instance quotes one market. Pick from the venue\'s live markets; run pendle/scan-incentives to see which have a budget and a small pool.',
+      catalogue: { source: 'market', kind: 'pendle/rates' },
     }),
     dryRun: z.boolean().default(true).meta({
       displayName: '模拟运行 (Dry Run)',
@@ -97,15 +98,15 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   })
 
   triggers(params: StrategyParams): Omit<Trigger, 'id' | 'strategyInstanceId'>[] {
-    const { marketId } = this.baseParamsSchema.parse(params.base)
+    const { market } = this.baseParamsSchema.parse(params.base)
     return [
-      { enabled: true, conditions: [{ type: 'monitor', sources: [{ monitorName: this.monitor('watch'), key: String(marketId) }] }] },
+      { enabled: true, conditions: [{ type: 'monitor', sources: [{ monitorName: this.monitor('watch'), key: market }] }] },
     ]
   }
 
   override subscriptions(params: StrategyParams): MonitorSource[] {
-    const { marketId } = this.baseParamsSchema.parse(params.base)
-    return [{ monitorName: this.monitor('watch'), key: String(marketId) }]
+    const { market } = this.baseParamsSchema.parse(params.base)
+    return [{ monitorName: this.monitor('watch'), key: market }]
   }
 
   private evaluating = false
@@ -121,18 +122,19 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   }
 
   private async evaluateInner(_context: StrategyContext): Promise<ExecutionInstruction[]> {
-    const { marketId, dryRun } = this.baseParamsSchema.parse(this.params.base)
+    const { market, dryRun } = this.baseParamsSchema.parse(this.params.base)
     const t = this.tunableParamsSchema.parse(this.params.tunable)
     const act = (action: string) => (dryRun ? `simulate${action.charAt(0).toUpperCase()}${action.slice(1)}` : action)
 
-    const record = await this.monitorData('watch')?.readLatest(String(marketId))
+    const record = await this.monitorData('watch')?.readLatest(market)
     const sample = record?.data as unknown as MarketWatchSample | undefined
     if (!sample) return []
     if (Date.now() - sample.ts > 120_000) {
-      log.warn({ marketId, ageMs: Date.now() - sample.ts }, 'market-watch sample is stale — not quoting on it')
+      log.warn({ market, ageMs: Date.now() - sample.ts }, 'market-watch sample is stale — not quoting on it')
       return []
     }
-    const { tokenId } = sample
+    // The venue ids ride on the sample — the picker only knows the symbol
+    const { marketId, tokenId } = sample
     const account = this.account('boros')
     const state = (await this.store.get<MakerState>(STATE_KEY)) ?? {}
     const out: ExecutionInstruction[] = []

@@ -71,7 +71,12 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
 
   override get keySchema() {
     return z.object({
-      marketId: z.string().regex(/^\d+$/).meta({ displayName: 'Boros market id', placeholder: '130', description: 'Run the pendle/scan-incentives script to see live markets and budgets' }),
+      market: z.string().min(3).meta({
+        displayName: 'Boros market',
+        placeholder: 'BINANCE-BTCUSDT-25SEP2026',
+        description: 'The Boros market symbol (as listed on the venue). Run pendle/scan-incentives to see live markets and budgets.',
+        catalogue: { source: 'market', kind: 'pendle/rates' },
+      }),
     })
   }
 
@@ -117,12 +122,10 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
   }
 
   private async runFeed(key: string, signal: AbortSignal): Promise<void> {
-    const marketId = Number(key)
-    if (!Number.isInteger(marketId)) {
-      this.logger.error({ key }, 'market-watch key must be a numeric Boros market id')
-      return
-    }
     const session = await this.adapters.resolve<BorosSession>('pendle/rates', 'boros')
+    // The key is the venue's market symbol (what the picker offers); a bare
+    // numeric id is accepted too for hand-typed keys.
+    let marketId = /^\d+$/.test(key) ? Number(key) : NaN
     let market: { tokenId: number; symbol: string; maturity: number } | undefined
     let campaignAt = 0
     let band: MarketWatchSample['band'] = {
@@ -139,8 +142,10 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
     while (!signal.aborted) {
       try {
         if (!market) {
-          const m = (await session.listLiveMarkets()).find(x => x.marketId === marketId)
-          if (!m) throw new Error(`market ${marketId} is not live/whitelisted`)
+          const all = await session.listLiveMarkets()
+          const m = all.find(x => (Number.isNaN(marketId) ? x.symbol === key : x.marketId === marketId))
+          if (!m) throw new Error(`market "${key}" is not live/whitelisted`)
+          marketId = m.marketId
           market = { tokenId: m.tokenId, symbol: m.symbol, maturity: m.maturity }
         }
         const now = Date.now()
