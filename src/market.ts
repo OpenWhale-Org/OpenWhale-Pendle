@@ -1,5 +1,6 @@
 import { privateKeyToAccount } from 'viem/accounts'
 import { OwAccount } from '@openwhaleorg/core'
+import { PENDLE_LOGO } from './brand.js'
 
 const API = 'https://api-v2.pendle.finance/core'
 
@@ -78,7 +79,7 @@ export class PendleMarketSession {
  * real (unlike the raw-chain wallet view, which can only price stables).
  */
 @OwAccount({
-  id: 'market-account', kind: 'pendle/market', venue: 'pendle', displayName: 'Pendle Account',
+  id: 'market-account', kind: 'pendle/market', venue: 'pendle', displayName: 'Pendle Account', logo: PENDLE_LOGO,
   sections: [
     {
       method: 'holdings', title: 'Holdings', kind: 'table', count: true, default: true, empty: 'No PT/YT/LP positions.',

@@ -1,4 +1,5 @@
 import { OwAccount } from '@openwhaleorg/core'
+import { BOROS_LOGO } from './brand.js'
 import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode } from './session.js'
 
 /**
@@ -8,7 +9,7 @@ import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode } 
  * loop's fuel gauge), and the agent approval's expiry.
  */
 @OwAccount({
-  id: 'boros-account', kind: 'pendle/rates', venue: 'boros', displayName: 'Boros Account',
+  id: 'boros-account', kind: 'pendle/rates', venue: 'boros', displayName: 'Boros Account', logo: BOROS_LOGO,
   // What the Accounts page shows for a Boros account — declared here, rendered
   // generically: rate positions and orders are not perp rows and should not
   // be squeezed into Symbol / Side / Value / uPnL.

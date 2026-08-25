@@ -5,7 +5,7 @@ export { PendleMarketSession, PendleMarketAccount } from './market.js'
 export type { PendleValuation } from './market.js'
 export { borosAgentCredentialType } from './credentialType.js'
 export { pendlePlugin } from './plugin.js'
-export { PENDLE_LOGO } from './brand.js'
+export { PENDLE_LOGO, BOROS_LOGO } from './brand.js'
 
 // Kind contracts — merged into core's kind table
 import type { BorosSession as BorosSessionClass } from './session.js'
