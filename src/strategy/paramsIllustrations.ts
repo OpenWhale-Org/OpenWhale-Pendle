@@ -10,6 +10,7 @@ import type { ParamIllustration } from '@openwhaleorg/core'
 
 const STYLE = `
   <style>
+    html, body { overflow: hidden; }
     body { margin: 0; padding: 10px 12px; background: #101012; color: #d4d4d8;
            font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
     svg { display: block; }
@@ -31,7 +32,7 @@ function draw() {
   var edge = num('edgeRatio', 0.95);
   var safe = num('safeDistanceRatio', 0.3);
   var sides = v.sides || 'both';
-  var W = Math.max(560, document.body.clientWidth - 26);
+  var W = Math.max(320, document.body.clientWidth - 26);
   var svg = document.getElementById('s');
   svg.setAttribute('width', W);
   svg.setAttribute('viewBox', '0 0 ' + W + ' 210');
@@ -65,7 +66,7 @@ function draw() {
   txt(X(0.5 * (safe + 1)), 100, 'keep', 'val'); txt(X(-0.5 * (safe + 1)), 100, 'keep', 'val');
   txt(X(0.5 * safe), 140, 'too close', 'lbl'); txt(X(-0.5 * safe), 140, 'too close', 'lbl');
   txt(X(1.15), 140, 'out of band', 'lbl'); txt(X(-1.15), 140, 'out of band', 'lbl');
-  txt(mid, 22, 'Rest at edgeRatio × range = ' + (edge * 100).toFixed(0) + '% of the half-width; re-quote when the order drifts out of the band or mid comes closer than safeDistanceRatio × range = ' + (safe * 100).toFixed(0) + '%', 'val');
+  txt(mid, 22, 'Rest at ' + (edge * 100).toFixed(0) + '% of the half-width; re-quote when out of band or closer than ' + (safe * 100).toFixed(0) + '%', 'val');
   svg.innerHTML = g;
 }
 window.addEventListener('message', function (e) { if (e.data && e.data.type === 'ow-params') { v = e.data.values || {}; draw(); } });
@@ -84,7 +85,7 @@ var v = {};
 function num(name, dflt) { var x = parseFloat(v[name]); return isFinite(x) ? x : dflt; }
 function draw() {
   var size = num('sizeYu', 10);
-  var W = Math.max(560, document.body.clientWidth - 26);
+  var W = Math.max(320, document.body.clientWidth - 26);
   var svg = document.getElementById('s');
   svg.setAttribute('width', W);
   svg.setAttribute('viewBox', '0 0 ' + W + ' 170');
@@ -100,8 +101,8 @@ function draw() {
     g += '<text x="' + (x + barW / 2) + '" y="' + (baseY - h - 5) + '" class="val" text-anchor="middle">' + (share * 100).toFixed(1) + '%</text>';
     g += '<text x="' + (x + barW / 2) + '" y="' + (baseY + 14) + '" class="lbl" text-anchor="middle">pool ' + pool + ' YU</text>';
   });
-  g += '<text x="' + x0 + '" y="20" class="val">Share of the side\\'s hourly budget with ' + size + ' YU resting in band, by size already resting there (the pool). Reward/h = budget × share.</text>';
-  g += '<text x="' + x0 + '" y="160" class="lbl">Every YU in band earns the same — the edge is as good as the touch. Small pools pay; a big pool dilutes you no matter where you rest.</text>';
+  g += '<text x="' + x0 + '" y="20" class="val">Share of the side budget with ' + size + ' YU in band, by pool size. Reward/h = budget × share.</text>';
+  g += '<text x="' + x0 + '" y="160" class="lbl">Every YU in band earns the same — the edge is as good as the touch. Small pools pay.</text>';
   svg.innerHTML = g;
 }
 window.addEventListener('message', function (e) { if (e.data && e.data.type === 'ow-params') { v = e.data.values || {}; draw(); } });
