@@ -1,7 +1,7 @@
 import { createWalletClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { arbitrum } from 'viem/chains'
-import { Agent, Exchange, getOpenApiSdk, MarketAccLib, CROSS_MARKET_ID, Side, TimeInForce } from '@pendle/boros-sdk-public'
+import { Agent, Exchange, getOpenApiSdk, MarketAccLib, AccountLib, CROSS_MARKET_ID, Side, TimeInForce } from '@pendle/boros-sdk-public'
 
 const DEFAULT_RPC = 'https://arb1.arbitrum.io/rpc'
 
@@ -197,7 +197,9 @@ export class BorosSession {
   }
 
   async enteredMarkets(): Promise<readonly number[]> {
-    return this.requireExchange().getEnteredMarkets(this.rootAddress!)
+    // The contract keys entered markets by the PACKED account (root + sub-account), not the address
+    const account = AccountLib.pack(this.rootAddress!, this.accountId) as unknown as `0x${string}`
+    return this.requireExchange().getEnteredMarkets(account)
   }
 
   async agentExpiry(): Promise<number> {
