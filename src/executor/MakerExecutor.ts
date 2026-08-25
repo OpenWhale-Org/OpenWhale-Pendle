@@ -100,7 +100,7 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
       this.logger.info({ ...p, cancelIds }, '[simulate] would cancel + place post-only')
       return { simulated: true, cancelled: cancelIds, placed: { side: p.side, sizeYu: p.sizeYu, apr: p.apr } }
     }
-    await boros.ensureEntered(p.marketId)
+    await boros.ensureEntered(p.marketId, p.tokenId)
     await boros.cancelOrders(p.marketId, p.tokenId, cancelIds)
     const placed = await boros.placeMakerOrder({ marketId: p.marketId, tokenId: p.tokenId, side: p.side as BorosSide, sizeYu: p.sizeYu, apr: p.apr })
     this.logger.info({ marketId: p.marketId, side: p.side, apr: p.apr, sizeYu: p.sizeYu, cancelled: cancelIds.length }, 'maker order re-quoted')
