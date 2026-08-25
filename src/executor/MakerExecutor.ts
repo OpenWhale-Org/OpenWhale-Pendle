@@ -16,6 +16,7 @@ import type { BorosSession, BorosSide } from '@jarei/openwhale-pendle'
  */
 
 const sideSchema = z.enum(['long', 'short'])
+const modeSchema = z.enum(['cross', 'isolated']).default('cross').meta({ description: 'Which margin account the order lives in' })
 
 export const makerActionSchemas = {
   quote: z.object({
@@ -25,16 +26,19 @@ export const makerActionSchemas = {
     sizeYu: z.number().positive().meta({ description: 'Order size in YU (collateral units of notional)' }),
     apr: z.number().meta({ description: 'Resting implied APR, decimal (0.068 = 6.8%)' }),
     protectOrderIds: z.array(z.string()).default([]).meta({ description: 'Baseline orders that must never be cancelled' }),
+    marginMode: modeSchema,
   }),
   cancel: z.object({
     marketId: z.number().int(),
     tokenId: z.number().int(),
     side: sideSchema.optional().meta({ description: 'Absent = both sides' }),
     protectOrderIds: z.array(z.string()).default([]),
+    marginMode: modeSchema,
   }),
   flatten: z.object({
     marketId: z.number().int(),
     tokenId: z.number().int(),
+    marginMode: modeSchema,
     /** The position the account is SUPPOSED to hold (baseline). Only the deviation is flattened. */
     baselineSizeYu: z.number().default(0),
     protectOrderIds: z.array(z.string()).default([]),
@@ -100,15 +104,15 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
   private async quote(p: z.infer<typeof makerActionSchemas.quote>, simulate: boolean): Promise<Record<string, unknown>> {
     const boros = this.boros()
     const protectedIds = new Set(p.protectOrderIds)
-    const resting = (await boros.restingOrders(p.marketId, p.tokenId)).filter(o => o.side === p.side && !protectedIds.has(o.orderId))
+    const resting = (await boros.restingOrders(p.marketId, p.tokenId, p.marginMode)).filter(o => o.side === p.side && !protectedIds.has(o.orderId))
     const cancelIds = resting.map(o => o.orderId)
     if (simulate) {
       this.logger.info({ ...p, cancelIds }, '[simulate] would cancel + place post-only')
-      return { simulated: true, cancelled: cancelIds, placed: { side: p.side, sizeYu: p.sizeYu, apr: p.apr } }
+      return { simulated: true, cancelled: cancelIds, placed: { side: p.side, sizeYu: p.sizeYu, apr: p.apr, marginMode: p.marginMode } }
     }
-    await boros.ensureEntered(p.marketId, p.tokenId)
-    await boros.cancelOrders(p.marketId, p.tokenId, cancelIds)
-    const placed = await boros.placeMakerOrder({ marketId: p.marketId, tokenId: p.tokenId, side: p.side as BorosSide, sizeYu: p.sizeYu, apr: p.apr })
+    await boros.ensureEntered(p.marketId, p.tokenId, p.marginMode)
+    await boros.cancelOrders(p.marketId, p.tokenId, cancelIds, p.marginMode)
+    const placed = await boros.placeMakerOrder({ marketId: p.marketId, tokenId: p.tokenId, side: p.side as BorosSide, sizeYu: p.sizeYu, apr: p.apr, mode: p.marginMode })
     this.logger.info({ marketId: p.marketId, side: p.side, apr: p.apr, sizeYu: p.sizeYu, cancelled: cancelIds.length }, 'maker order re-quoted')
     return { cancelled: cancelIds, placed }
   }
@@ -116,13 +120,13 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
   private async cancel(p: z.infer<typeof makerActionSchemas.cancel>, simulate: boolean): Promise<Record<string, unknown>> {
     const boros = this.boros()
     const protectedIds = new Set(p.protectOrderIds)
-    const resting = (await boros.restingOrders(p.marketId, p.tokenId)).filter(o => (p.side === undefined || o.side === p.side) && !protectedIds.has(o.orderId))
+    const resting = (await boros.restingOrders(p.marketId, p.tokenId, p.marginMode)).filter(o => (p.side === undefined || o.side === p.side) && !protectedIds.has(o.orderId))
     const ids = resting.map(o => o.orderId)
     if (simulate) {
       this.logger.info({ ...p, ids }, '[simulate] would cancel')
       return { simulated: true, cancelled: ids }
     }
-    await boros.cancelOrders(p.marketId, p.tokenId, ids)
+    await boros.cancelOrders(p.marketId, p.tokenId, ids, p.marginMode)
     return { cancelled: ids }
   }
 
@@ -134,7 +138,7 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
    */
   private async flatten(p: z.infer<typeof makerActionSchemas.flatten>, simulate: boolean): Promise<Record<string, unknown>> {
     const boros = this.boros()
-    const position = await boros.crossPosition(p.marketId, p.tokenId)
+    const position = await boros.crossPosition(p.marketId, p.tokenId, p.marginMode)
     const delta = (position?.signedSizeYu ?? 0) - p.baselineSizeYu
     if (Math.abs(delta) < 1e-9) return { flat: true }
     const quote = await boros.marketQuote(p.marketId)
@@ -142,13 +146,13 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
     const touch = side === 'short' ? (quote.bestBid ?? quote.midApr) : (quote.bestAsk ?? quote.midApr)
     const apr = side === 'short' ? touch * (1 - p.slippage) : touch * (1 + p.slippage)
     const protectedIds = new Set(p.protectOrderIds)
-    const ours = (await boros.restingOrders(p.marketId, p.tokenId)).filter(o => !protectedIds.has(o.orderId)).map(o => o.orderId)
+    const ours = (await boros.restingOrders(p.marketId, p.tokenId, p.marginMode)).filter(o => !protectedIds.has(o.orderId)).map(o => o.orderId)
     if (simulate) {
       this.logger.info({ marketId: p.marketId, delta, side, apr, cancel: ours }, '[simulate] would cancel ours + IOC the deviation')
       return { simulated: true, deltaYu: delta, side, apr, cancelled: ours }
     }
-    await boros.cancelOrders(p.marketId, p.tokenId, ours)
-    const result = await boros.takerOrder({ marketId: p.marketId, tokenId: p.tokenId, side, sizeYu: Math.abs(delta), apr })
+    await boros.cancelOrders(p.marketId, p.tokenId, ours, p.marginMode)
+    const result = await boros.takerOrder({ marketId: p.marketId, tokenId: p.tokenId, side, sizeYu: Math.abs(delta), apr, mode: p.marginMode })
     this.logger.warn({ marketId: p.marketId, delta, side, apr }, 'deviation from baseline flattened after an accidental fill')
     return { deltaYu: delta, side, apr, cancelled: ours, result }
   }

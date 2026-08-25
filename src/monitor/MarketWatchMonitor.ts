@@ -21,6 +21,8 @@ export const marketWatchSchema = z.object({
   bestAsk: z.number().optional(),
   nextSettlementTime: z.number(),
   maturity: z.number(),
+  /** The venue refuses cross-margin orders here. */
+  isolatedOnly: z.boolean(),
   band: z.object({
     long: z.object({ range: z.number(), budgetPerHour: z.number(), poolYu: z.number() }),
     short: z.object({ range: z.number(), budgetPerHour: z.number(), poolYu: z.number() }),
@@ -126,7 +128,7 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
     // The key is the venue's market symbol (what the picker offers); a bare
     // numeric id is accepted too for hand-typed keys.
     let marketId = /^\d+$/.test(key) ? Number(key) : NaN
-    let market: { tokenId: number; symbol: string; maturity: number } | undefined
+    let market: { tokenId: number; symbol: string; maturity: number; isolatedOnly: boolean } | undefined
     let campaignAt = 0
     let band: MarketWatchSample['band'] = {
       long: { range: 0, budgetPerHour: 0, poolYu: 0 },
@@ -146,7 +148,7 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
           const m = all.find(x => (Number.isNaN(marketId) ? x.symbol === key : x.marketId === marketId))
           if (!m) throw new Error(`market "${key}" is not live/whitelisted`)
           marketId = m.marketId
-          market = { tokenId: m.tokenId, symbol: m.symbol, maturity: m.maturity }
+          market = { tokenId: m.tokenId, symbol: m.symbol, maturity: m.maturity, isolatedOnly: m.isolatedOnly }
         }
         const now = Date.now()
         if (now - campaignAt >= this.options.campaignRefreshMs) {
@@ -172,6 +174,7 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
           ...(quote.bestAsk !== undefined ? { bestAsk: quote.bestAsk } : {}),
           nextSettlementTime: quote.nextSettlementTime,
           maturity: market.maturity,
+          isolatedOnly: market.isolatedOnly,
           band,
           bookInBandYu: {
             long: sizeInBand(book.long, mid - band.long.range, mid),

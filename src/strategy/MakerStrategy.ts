@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { BaseStrategy, createLogger } from '@openwhaleorg/core'
 import type { ExecutionInstruction, StrategyContext, StrategyParams, Trigger, StrategyDeclarations, MonitorSource } from '@openwhaleorg/core'
 import { BorosRatesAccount } from '@jarei/openwhale-pendle'
-import type { BorosSide } from '@jarei/openwhale-pendle'
+import type { BorosSide, BorosMarginMode } from '@jarei/openwhale-pendle'
 import type { MarketWatchSample } from '../monitor/MarketWatchMonitor.js'
 import { judgeSide } from './corridor.js'
 
@@ -81,6 +81,10 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       displayName: '模拟运行 (Dry Run)',
       description: 'Follows the band and logs every cancel/place it would send, without sending. Switch off explicitly to go live.',
     }),
+    marginMode: z.enum(['auto', 'cross', 'isolated']).default('auto').meta({
+      displayName: '保证金模式',
+      description: 'Which margin account the orders live in. auto = isolated when the venue marks the market isolated-only, else cross. The baseline snapshot and all reads/cancels are scoped to this account.',
+    }),
     baselineSnapshot: z.boolean().default(true).meta({
       displayName: '基线快照 (Baseline)',
       description: 'On every activation, record the position and resting orders the cross account already holds on this market and never touch them: only add orders on top, flatten only deviations. Best effort — the venue does not isolate the account, so a manual trade after activation looks like a fill. Recommended: run on a dedicated sub-account. Off = everything on the market is treated as the strategy\'s own.',
@@ -145,7 +149,7 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   }
 
   private async evaluateInner(_context: StrategyContext): Promise<ExecutionInstruction[]> {
-    const { market, dryRun, baselineSnapshot } = this.baseParamsSchema.parse(this.params.base)
+    const { market, dryRun, baselineSnapshot, marginMode: modeParam } = this.baseParamsSchema.parse(this.params.base)
     const t = this.tunableParamsSchema.parse(this.params.tunable)
     const act = (action: string) => (dryRun ? `simulate${action.charAt(0).toUpperCase()}${action.slice(1)}` : action)
 
@@ -158,6 +162,11 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     }
     // The venue ids ride on the sample — the picker only knows the symbol
     const { marketId, tokenId } = sample
+    const mode: BorosMarginMode = modeParam === 'auto' ? (sample.isolatedOnly ? 'isolated' : 'cross') : modeParam
+    if (mode === 'cross' && sample.isolatedOnly) {
+      log.warn({ market }, 'market is isolated-only but marginMode=cross — the venue will refuse; set marginMode to auto/isolated')
+      return []
+    }
     const account = this.account('boros')
     const state = (await this.store.get<MakerState>(STATE_KEY)) ?? {}
     const out: ExecutionInstruction[] = []
@@ -166,8 +175,8 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     // ── Baseline: what the account held when this activation began ──────────
     if (!this.baselineTaken) {
       const [position, resting] = await Promise.all([
-        account.crossPosition(marketId, tokenId).catch(() => undefined),
-        account.restingOrders(marketId, tokenId).catch(() => []),
+        account.crossPosition(marketId, tokenId, mode).catch(() => undefined),
+        account.restingOrders(marketId, tokenId, mode).catch(() => []),
       ])
       state.baseline = baselineSnapshot
         ? { signedSizeYu: position?.signedSizeYu ?? 0, orderIds: resting.map(o => o.orderId), takenAt: now }
@@ -176,18 +185,18 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       delete state.short
       this.baselineTaken = true
       await this.store.set(STATE_KEY, state)
-      log.info({ market, baseline: state.baseline, snapshot: baselineSnapshot }, 'baseline taken — untouchable from here on')
+      log.info({ market, mode, baseline: state.baseline, snapshot: baselineSnapshot }, 'baseline taken — untouchable from here on')
     }
     const baseline = state.baseline ?? { signedSizeYu: 0, orderIds: [], takenAt: 0 }
     const protectOrderIds = baseline.orderIds
 
     // ── Accident check: the cross position drifted from the baseline → one of OUR orders filled ──
-    const position = await account.crossPosition(marketId, tokenId).catch(() => undefined)
+    const position = await account.crossPosition(marketId, tokenId, mode).catch(() => undefined)
     const delta = (position?.signedSizeYu ?? 0) - baseline.signedSizeYu
     if (Math.abs(delta) > 1e-9) {
       if ((state.lastFlattenTs ?? 0) < now - 30_000) {
         log.warn({ marketId, deltaYu: delta, baselineYu: baseline.signedSizeYu }, 'position deviates from baseline — flattening the deviation')
-        out.push(this.instruction('maker', act('flatten'), { marketId, tokenId, baselineSizeYu: baseline.signedSizeYu, protectOrderIds, slippage: t.flattenSlippage }, ['boros']))
+        out.push(this.instruction('maker', act('flatten'), { marketId, tokenId, marginMode: mode, baselineSizeYu: baseline.signedSizeYu, protectOrderIds, slippage: t.flattenSlippage }, ['boros']))
         state.lastFlattenTs = now
         delete state.long
         delete state.short
@@ -209,7 +218,7 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     if (state.gasPaused) { state.gasPaused = false; await this.store.set(STATE_KEY, state) }
 
     // ── Corridor per side (only OUR orders count — baseline ones are invisible here) ──
-    const resting = (await account.restingOrders(marketId, tokenId).catch(() => [])).filter(o => !protectOrderIds.includes(o.orderId))
+    const resting = (await account.restingOrders(marketId, tokenId, mode).catch(() => [])).filter(o => !protectOrderIds.includes(o.orderId))
     const sides: BorosSide[] = t.sides === 'both' ? ['long', 'short'] : [t.sides]
     let dirty = false
     for (const side of sides) {
@@ -221,14 +230,14 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       if (verdict.action === 'keep') continue
       if (verdict.action === 'requote' && (state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
       log.info({ marketId, side, action: verdict.action, apr: verdict.targetApr, reason: verdict.reason, mid: sample.midApr }, 'quoting')
-      out.push(this.instruction('maker', act('quote'), { marketId, tokenId, side, sizeYu: t.sizeYu, apr: verdict.targetApr, protectOrderIds }, ['boros']))
+      out.push(this.instruction('maker', act('quote'), { marketId, tokenId, marginMode: mode, side, sizeYu: t.sizeYu, apr: verdict.targetApr, protectOrderIds }, ['boros']))
       state[side] = { apr: verdict.targetApr, ts: now }
       dirty = true
     }
     // Sides we no longer quote (config narrowed) get cleaned up once
     for (const side of (['long', 'short'] as BorosSide[]).filter(s => !sides.includes(s))) {
       if (state[side] || resting.some(o => o.side === side)) {
-        out.push(this.instruction('maker', act('cancel'), { marketId, tokenId, side, protectOrderIds }, ['boros']))
+        out.push(this.instruction('maker', act('cancel'), { marketId, tokenId, marginMode: mode, side, protectOrderIds }, ['boros']))
         delete state[side]
         dirty = true
       }
