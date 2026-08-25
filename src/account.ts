@@ -48,31 +48,43 @@ export class BorosRatesAccount {
     return { usd: { available: total, total }, tokens }
   }
 
-  /** Every open position, cross and isolated — what the venue UI shows. */
-  async positions(): Promise<Array<{ symbol: string; mode: 'cross' | 'isolated'; side: 'long' | 'short'; sizeYu: number; fixedAprPct: number; unrealisedPnl: number; settlementPnl: number; cumulativePnl: number }>> {
+  /**
+   * Every open position, cross and isolated — what the venue UI shows. Rows
+   * follow the dashboard's position convention ({ id, side, value, pnl })
+   * with the rate-specific facts alongside.
+   */
+  async positions(): Promise<Array<{ id: string; side: 'long' | 'short'; value: number; pnl: number; symbol: string; mode: 'cross' | 'isolated'; sizeYu: number; fixedAprPct: number; unrealisedPnl: number; settlementPnl: number }>> {
     const [positions, markets] = await Promise.all([this.session.activePositions(), this.session.listLiveMarkets().catch(() => [])])
     const symbol = new Map(markets.map(m => [m.marketId, m.symbol]))
-    return positions.map(p => ({
-      symbol: symbol.get(p.marketId) ?? `market ${p.marketId}`,
-      mode: p.isCross ? 'cross' as const : 'isolated' as const,
-      side: p.signedSizeYu >= 0 ? 'long' as const : 'short' as const,
-      sizeYu: Math.abs(p.signedSizeYu),
-      fixedAprPct: p.fixedApr * 100,
-      unrealisedPnl: p.unrealisedPnl,
-      settlementPnl: p.settlementPnl,
-      cumulativePnl: p.cumulativePnl,
-    }))
+    return positions.map(p => {
+      const sym = symbol.get(p.marketId) ?? `market ${p.marketId}`
+      const mode = p.isCross ? 'cross' as const : 'isolated' as const
+      return {
+        id: `${sym} · ${mode} @ ${(p.fixedApr * 100).toFixed(2)}%`,
+        side: p.signedSizeYu >= 0 ? 'long' as const : 'short' as const,
+        value: Math.abs(p.signedSizeYu),
+        pnl: p.unrealisedPnl + p.settlementPnl,
+        symbol: sym,
+        mode,
+        sizeYu: Math.abs(p.signedSizeYu),
+        fixedAprPct: p.fixedApr * 100,
+        unrealisedPnl: p.unrealisedPnl,
+        settlementPnl: p.settlementPnl,
+      }
+    })
   }
 
-  /** Every open order, cross and isolated. */
-  async orders(): Promise<Array<{ id: string; symbol: string; mode: 'cross' | 'isolated'; side: 'long' | 'short'; aprPct: number; sizeYu: number; unfilledYu: number }>> {
+  /** Every open order, cross and isolated — dashboard convention { id, side, value, status } plus rate facts. */
+  async orders(): Promise<Array<{ id: string; side: 'long' | 'short'; value: number; status: 'open' | 'partial'; symbol: string; mode: 'cross' | 'isolated'; aprPct: number; sizeYu: number; unfilledYu: number }>> {
     const [orders, markets] = await Promise.all([this.session.openOrders(), this.session.listLiveMarkets().catch(() => [])])
     const symbol = new Map(markets.map(m => [m.marketId, m.symbol]))
     return orders.map(o => ({
-      id: o.orderId,
+      id: `${o.orderId.slice(0, 6)}… ${symbol.get(o.marketId) ?? o.marketId} · ${o.isCross ? 'cross' : 'isolated'} @ ${(o.apr * 100).toFixed(2)}%`,
+      side: o.side,
+      value: o.sizeYu,
+      status: o.unfilledYu < o.sizeYu ? 'partial' as const : 'open' as const,
       symbol: symbol.get(o.marketId) ?? `market ${o.marketId}`,
       mode: o.isCross ? 'cross' as const : 'isolated' as const,
-      side: o.side,
       aprPct: o.apr * 100,
       sizeYu: o.sizeYu,
       unfilledYu: o.unfilledYu,
