@@ -111,12 +111,3 @@ Everything the strategy does goes through this executor; the dashboard's **Manua
 | `simulate*` | same | Log the exact venue call without sending — what dry run uses. |
 
 `apr` is a decimal implied APR (`0.068` = 6.8 %, negatives are allowed). `sizeYu` is in YU.
-
-### Development
-
-```sh
-pnpm install
-pnpm typecheck
-pnpm test        # corridor unit tests
-pnpm build       # dist/ — what the OpenWhale dashboard installs
-```
