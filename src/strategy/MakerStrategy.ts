@@ -178,13 +178,15 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
         account.crossPosition(marketId, tokenId, mode).catch(() => undefined),
         account.restingOrders(marketId, tokenId, mode).catch(() => []),
       ])
-      // Orders resting exactly where THIS instance last quoted are its own
-      // leftovers from before a restart, not the operator's — keep them out of
-      // the baseline so they get managed (re-quoted / cancelled) as usual.
-      const ownApr = (side: BorosSide) => state[side]?.apr
-      const isOurs = (o: { side: BorosSide; apr: number }) => {
-        const apr = ownApr(o.side)
-        return apr !== undefined && Math.abs(o.apr - apr) < 1e-6
+      // Our own leftovers from before a restart must not become baseline, or
+      // every restart stacks a fresh pair on top of the old one. An order is
+      // ours when it has exactly our size and rests inside the band on its
+      // side — the operator's hand-placed orders never match that signature.
+      const isOurs = (o: { side: BorosSide; apr: number; sizeYu: number }) => {
+        if (Math.abs(o.sizeYu - t.sizeYu) > 1e-9) return false
+        const band = sample.band[o.side]
+        const distance = o.side === 'long' ? sample.midApr - o.apr : o.apr - sample.midApr
+        return distance >= -band.range && distance <= band.range * 1.5
       }
       const inherited = resting.filter(o => !isOurs(o))
       state.baseline = baselineSnapshot
@@ -234,7 +236,10 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       const mine = resting.filter(o => o.side === side)
       const restingApr = mine[0]?.apr ?? (dryRun ? state[side]?.apr : undefined)
       const verdict = judgeSide({ side, mid: sample.midApr, range: band.range, restingApr, params: t })
-      if (verdict.action === 'keep') continue
+      // More than one of ours on a side (a restart, a lagging read) → a quote
+      // consolidates: the executor cancels all of them and rests exactly one.
+      if (verdict.action === 'keep' && mine.length <= 1) continue
+      if (mine.length > 1) log.warn({ market, side, count: mine.length }, 'several own orders resting — consolidating to one')
       // One emission per side per interval — for 'place' too: the contract
       // read lags the relay by a few seconds, so a fresh order is invisible on
       // the next tick and would be placed twice (seen live: two 50-YU longs).
