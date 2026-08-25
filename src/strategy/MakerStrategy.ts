@@ -108,9 +108,9 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       section: '走廊', displayName: '安全内线 (带宽比例)',
       description: 'Re-quote away when mid comes closer than this fraction of the half-width — fill risk rises fast near the touch.',
     }),
-    requoteIntervalMs: z.number().int().min(1_000).default(10_000).meta({
-      section: '走廊', displayName: '最小重挂间隔 (ms)',
-      description: 'Per side. Every re-quote is a relayed cancel + place; this bounds churn in fast markets.',
+    requoteIntervalMs: z.number().int().min(5_000).default(30_000).meta({
+      section: '走廊', displayName: '最小挂单间隔 (ms)',
+      description: 'Per side, for placing AND re-quoting. Every emission is a relayed cancel + place, and the contract read lags the relay by a few seconds — shorter than ~15s risks stacking a duplicate order.',
     }),
     gasFloorUsd: z.number().min(0).default(3).meta({
       section: '风控', displayName: 'Gas 余额地板 (USD)',
@@ -228,7 +228,10 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       const restingApr = mine[0]?.apr ?? (dryRun ? state[side]?.apr : undefined)
       const verdict = judgeSide({ side, mid: sample.midApr, range: band.range, restingApr, params: t })
       if (verdict.action === 'keep') continue
-      if (verdict.action === 'requote' && (state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
+      // One emission per side per interval — for 'place' too: the contract
+      // read lags the relay by a few seconds, so a fresh order is invisible on
+      // the next tick and would be placed twice (seen live: two 50-YU longs).
+      if ((state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
       log.info({ marketId, side, action: verdict.action, apr: verdict.targetApr, reason: verdict.reason, mid: sample.midApr }, 'quoting')
       out.push(this.instruction('maker', act('quote'), { marketId, tokenId, marginMode: mode, side, sizeYu: t.sizeYu, apr: verdict.targetApr, protectOrderIds }, ['boros']))
       state[side] = { apr: verdict.targetApr, ts: now }
