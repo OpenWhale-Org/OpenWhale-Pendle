@@ -1,8 +1,8 @@
 {
-  "name": "@jarei/openwhale-pendle",
+  "name": "@openwhaleorg/pendle",
   "version": "0.1.0",
-  "private": true,
-  "description": "Pendle venue plugin for OpenWhale \u2014 Pendle V2 (PT/YT) + Boros (IRS) under one roof; lives OUTSIDE the framework repo on purpose",
+  "description": "Pendle venue plugin for OpenWhale — Pendle V2 (PT/YT) and Boros (interest-rate swaps) under one roof",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -11,26 +11,42 @@
       "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenWhale-Org/OpenWhale-Pendle.git",
+    "directory": "openwhale-pendle"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist",
     "build:plugin": "pnpm build && esbuild src/plugin.ts --bundle --format=esm --platform=node --target=es2022 --external:@openwhaleorg/core --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\" --outfile=dist/pendle.plugin.mjs",
     "probe": "npx tsx --env-file=.env scripts/probe.ts"
   },
   "dependencies": {
-    "zod": "4.4.1",
+    "zod": "^4.4.1",
     "@pendle/boros-sdk-public": "^0.3.1",
-    "@openwhaleorg/core": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core",
-    "@openwhaleorg/web3": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/web3",
     "viem": "2.55.10"
+  },
+  "peerDependencies": {
+    "@openwhaleorg/core": "^0.2.0",
+    "@openwhaleorg/web3": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "esbuild": "^0.28.0",
     "tsx": "^4.19.2",
     "typescript": "5.4.5",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "@openwhaleorg/core": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core",
+    "@openwhaleorg/web3": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/web3"
   }
 }
