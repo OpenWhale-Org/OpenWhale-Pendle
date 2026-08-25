@@ -25,20 +25,25 @@ export class BorosRatesAccount {
     }
   }
 
-  async positions(): Promise<Array<{ marketId: number; symbol: string; detail: unknown }>> {
-    const [entered, markets] = await Promise.all([
-      this.session.enteredMarkets(),
-      this.session.listLiveMarkets(),
-    ])
+  async positions(): Promise<Array<{ marketId: number; symbol: string; signedSizeYu: number; positionValue: number }>> {
+    const markets = await this.session.listLiveMarkets()
     const byId = new Map(markets.map(m => [m.marketId, m]))
-    const out: Array<{ marketId: number; symbol: string; detail: unknown }> = []
-    for (const marketId of entered) {
-      const market = byId.get(marketId)
-      if (!market) continue
+    // Entry is per collateral token: ask once per tokenId the venue lists
+    const tokenIds = Array.from(new Set(markets.map(m => m.tokenId)))
+    const out: Array<{ marketId: number; symbol: string; signedSizeYu: number; positionValue: number }> = []
+    for (const tokenId of tokenIds) {
+      let entered: readonly number[] = []
       try {
-        const detail = await this.session.positions(marketId, market.tokenId)
-        out.push({ marketId, symbol: market.symbol, detail })
-      } catch { /* per-market read failures stay per-market */ }
+        entered = await this.session.enteredMarkets(tokenId)
+      } catch { continue }
+      for (const marketId of entered) {
+        const market = byId.get(marketId)
+        if (!market) continue
+        try {
+          const p = await this.session.position(marketId, tokenId)
+          if (p && Math.abs(p.signedSizeYu) > 0) out.push({ marketId, symbol: market.symbol, signedSizeYu: p.signedSizeYu, positionValue: p.positionValue })
+        } catch { /* per-market read failures stay per-market */ }
+      }
     }
     return out
   }
