@@ -1,0 +1,19 @@
+{
+  "name": "openwhale-pendle-workspace",
+  "private": true,
+  "description": "Workspace for the OpenWhale Pendle packages: the venue plugin and the strategy package",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod": "4.4.1"
+    }
+  },
+  "devDependencies": {
+    "typescript": "5.4.5"
+  }
+}
