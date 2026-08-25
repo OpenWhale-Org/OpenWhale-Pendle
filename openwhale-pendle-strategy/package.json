@@ -1,6 +1,6 @@
 {
   "name": "@openwhaleorg/pendle-strategy",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenWhale Pendle Strategy — Pendle / Boros strategies for OpenWhale (Boros maker rewards first)",
   "license": "MIT",
   "type": "module",

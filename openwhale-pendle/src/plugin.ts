@@ -1,4 +1,5 @@
 import type { PluginFactory } from '@openwhaleorg/core'
+import { PACKAGE_VERSION } from './version.js'
 import { borosAgentCredentialType } from './credentialType.js'
 import { PendleMarketSession, PendleMarketAccount } from './market.js'
 import { PENDLE_LOGO } from './brand.js'
@@ -15,7 +16,7 @@ import { setupAgentScript, scanIncentivesScript } from './scripts.js'
  */
 export const pendlePlugin: PluginFactory = (ctx) => ({
   name: 'pendle',
-  version: '0.1.0',
+  version: PACKAGE_VERSION,
   logo: PENDLE_LOGO,
   readme: [
     '# pendle',

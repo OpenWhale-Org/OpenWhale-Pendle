@@ -1,4 +1,5 @@
 import type { OpenWhalePlugin, PluginFactory } from '@openwhaleorg/core'
+import { PACKAGE_VERSION } from './version.js'
 import { MarketWatchMonitor, marketWatchParamsSchema } from './monitor/MarketWatchMonitor.js'
 import { MakerExecutor } from './executor/MakerExecutor.js'
 import { MakerStrategy } from './strategy/MakerStrategy.js'
@@ -13,7 +14,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
   const now = new Date().toISOString()
   return {
     name: 'pendle-strategy',
-    version: '0.1.0',
+    version: PACKAGE_VERSION,
     logo: PENDLE_LOGO,
     readme: [
       '# OpenWhale Pendle Strategy',
