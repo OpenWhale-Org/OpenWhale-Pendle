@@ -186,7 +186,7 @@ export const scanIncentivesScript: ScriptDefinition = {
         isolatedOnly: m.imData.isIsolatedOnly === true, daysToMaturity: (m.imData.maturity - now) / 86400, midApr, sides,
         rewardPerHour, usdPerDay, usdToMaturity: usdPerDay * Math.max(0, (m.imData.maturity - now) / 86400), aprOnCapital: capitalUsd > 0 ? (usdPerDay * 365) / capitalUsd : 0,
       })
-      emit?.(`${m.imData.symbol}: ${rewardPerHour.toFixed(4)} PENDLE/h → $${usdPerDay.toFixed(2)}/day`)
+      emit?.(`${m.imData.symbol}: ${rewardPerHour.toFixed(4)} PENDLE/h = ${(rewardPerHour * 24).toFixed(2)} PENDLE/day (≈ $${usdPerDay.toFixed(2)} at $${pendleUsd.toFixed(3)})`)
     }
     plans.sort((a, b) => b.usdPerDay - a.usdPerDay)
     if (plans.length === 0) return { text: 'No live maker-incentive budgets right now.', json: [] }
@@ -194,7 +194,7 @@ export const scanIncentivesScript: ScriptDefinition = {
     const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`
     const sideCell = (s: SidePlan) => `${s.side === 'long' ? 'L' : 'S'} ${s.sizeYu}YU/${s.poolYu.toFixed(0)} ${pct(s.share, 0)} of ${s.budgetPerHour.toFixed(2)}/h`
     const rows = plans.map((p, i) =>
-      `${String(i + 1).padStart(2)}. ${p.symbol.padEnd(34)} $${p.usdPerDay.toFixed(2).padStart(7)}/d ${pct(p.aprOnCapital).padStart(7)} APR  $${p.usdToMaturity.toFixed(0).padStart(5)} to expiry  ±${pct(p.sides[0]!.range, 2)}  ${p.daysToMaturity.toFixed(0).padStart(3)}d  ${p.sides.map(sideCell).join('  ')}`)
+      `${String(i + 1).padStart(2)}. ${p.symbol.padEnd(34)} ${(p.rewardPerHour * 24).toFixed(2).padStart(7)} PENDLE/d (≈$${p.usdPerDay.toFixed(2).padStart(6)}) ${pct(p.aprOnCapital).padStart(7)} APR  ${(p.rewardPerHour * 24 * p.daysToMaturity).toFixed(0).padStart(5)} PENDLE to expiry  ±${pct(p.sides[0]!.range, 2)}  ${p.daysToMaturity.toFixed(0).padStart(3)}d  ${p.sides.map(sideCell).join('  ')}`)
 
     const best = plans[0]!
     const second = plans[1]
@@ -203,10 +203,10 @@ export const scanIncentivesScript: ScriptDefinition = {
       why.push(`• ${s.side}: $${(capitalUsd * marginUse / best.sides.length).toFixed(0)} of margin buys ${s.sizeYu} YU (the venue asks ${pct(s.marginPerYu, 2)} of notional per YU at ${pct(s.edgeApr, 2)} APR). Against the ${s.poolYu.toFixed(1)} YU already in band that is a ${pct(s.share)} share of the ${s.budgetPerHour.toFixed(3)} PENDLE/h budget → ${s.rewardPerHour.toFixed(4)} PENDLE/h.`)
     }
     why.push(`• Band ±${pct(best.sides[0]!.range, 2)} around a mid of ${pct(best.midApr, 2)}: resting at ${pct(edgeRatio, 0)} of the half-width keeps the order ${pct(best.sides[0]!.range * edgeRatio, 2)} from mid.`)
-    why.push(`• ${best.daysToMaturity.toFixed(0)} days to maturity${best.daysToMaturity < 7 ? ` — the budget stops at expiry, so this is ≈ $${best.usdToMaturity.toFixed(0)} in total; re-run the scan afterwards` : ''}${best.isolatedOnly ? ' · isolated-only market (marginMode auto → isolated)' : ''} · collateral ${best.collateral} ($${best.collateralUsd.toFixed(2)}).`)
+    why.push(`• ${best.daysToMaturity.toFixed(0)} days to maturity${best.daysToMaturity < 7 ? ` — the budget stops at expiry, so this is ≈ ${(best.rewardPerHour * 24 * best.daysToMaturity).toFixed(1)} PENDLE (≈ $${best.usdToMaturity.toFixed(0)}) in total; re-run the scan afterwards` : ''}${best.isolatedOnly ? ' · isolated-only market (marginMode auto → isolated)' : ''} · collateral ${best.collateral} ($${best.collateralUsd.toFixed(2)}).`)
     const longest = plans.filter(p => p.daysToMaturity >= 14).sort((a, b) => b.usdPerDay - a.usdPerDay)[0]
-    if (longest && longest !== best) why.push(`• Best with ≥14 days left: ${longest.symbol} at $${longest.usdPerDay.toFixed(2)}/day (${pct(longest.aprOnCapital)} APR) — pick this if you would rather not redeploy in ${best.daysToMaturity.toFixed(0)} days.`)
-    if (second) why.push(`• Runner-up ${second.symbol} would earn $${second.usdPerDay.toFixed(2)}/day (${pct(second.aprOnCapital)} APR) — ${second.usdPerDay < best.usdPerDay * 0.5 ? 'less than half' : 'close; consider splitting the capital'}.`)
+    if (longest && longest !== best) why.push(`• Best with ≥14 days left: ${longest.symbol} at ${(longest.rewardPerHour * 24).toFixed(2)} PENDLE/day (≈ $${longest.usdPerDay.toFixed(2)}, ${pct(longest.aprOnCapital)} APR) — pick this if you would rather not redeploy in ${best.daysToMaturity.toFixed(0)} days.`)
+    if (second) why.push(`• Runner-up ${second.symbol} would earn ${(second.rewardPerHour * 24).toFixed(2)} PENDLE/day (≈ $${second.usdPerDay.toFixed(2)}, ${pct(second.aprOnCapital)} APR) — ${second.usdPerDay < best.usdPerDay * 0.5 ? 'less than half' : 'close; consider splitting the capital'}.`)
 
     const paramsBlock = [
       `market:            ${best.symbol}  (id ${best.marketId})`,
@@ -215,10 +215,10 @@ export const scanIncentivesScript: ScriptDefinition = {
       `marginMode:        auto`,
       `edgeRatio:         ${edgeRatio}`,
       `deposit:           $${capitalUsd} of ${best.collateral} into this market's ${best.isolatedOnly ? 'isolated' : 'cross'} account, plus a few USD of gas balance`,
-      `expected:          ${best.rewardPerHour.toFixed(4)} PENDLE/h ≈ $${best.usdPerDay.toFixed(2)}/day ≈ ${pct(best.aprOnCapital)} APR on the capital (at today's pool, budget and PENDLE price)`,
+      `expected:          ${best.rewardPerHour.toFixed(4)} PENDLE/h = ${(best.rewardPerHour * 24).toFixed(2)} PENDLE/day (≈ $${best.usdPerDay.toFixed(2)} at PENDLE $${pendleUsd.toFixed(3)} → ${pct(best.aprOnCapital)} APR on the capital; pool and budget as of now)`,
     ]
     const text = [
-      `Ranked by USD/day for $${capitalUsd} (${(marginUse * 100).toFixed(0)}% as margin, sides: ${wantSides}). Cells: side sizeYU/pool share-of-budget. 1 YU = 1 unit of the collateral token (a whole BTC on BTC-margined markets).`,
+      `Ranked by PENDLE/day for $${capitalUsd} (${(marginUse * 100).toFixed(0)}% as margin, sides: ${wantSides}); $ figures are estimates at PENDLE $${pendleUsd.toFixed(3)}. Cells: side sizeYU/pool share-of-budget. 1 YU = 1 unit of the collateral token (a whole BTC on BTC-margined markets).`,
       ...rows,
       '',
       `── Best: ${best.symbol} ──────────────────────────────────────────`,
