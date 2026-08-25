@@ -106,6 +106,22 @@ function normalizeKey(key: string): `0x${string}` {
  * status code 400") — the venue's actual reason lives in the response body.
  * Re-throw with it attached so executions record why.
  */
+/**
+ * Execution records are JSON — and the SDK's order results carry bigints
+ * (sizes, ids), which JSON.stringify refuses. Deep-convert them to strings so
+ * a successful placement can actually be recorded.
+ */
+function jsonSafe(value: unknown): unknown {
+  if (typeof value === 'bigint') return value.toString()
+  if (Array.isArray(value)) return value.map(jsonSafe)
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = jsonSafe(v)
+    return out
+  }
+  return value
+}
+
 async function withVenueError<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
@@ -384,7 +400,7 @@ export class BorosSession {
       slippage: 0,
       tif: TimeInForce.ADD_LIQUIDITY_ONLY,
     }))
-    return result as unknown as Record<string, unknown>
+    return jsonSafe(result) as Record<string, unknown>
   }
 
   /** Immediate-or-cancel order at an aggressive APR — the flatten path after an accidental fill. */
@@ -398,7 +414,7 @@ export class BorosSession {
       slippage: 0,
       tif: TimeInForce.IMMEDIATE_OR_CANCEL,
     }))
-    return result as unknown as Record<string, unknown>
+    return jsonSafe(result) as Record<string, unknown>
   }
 
   async cancelOrders(marketId: number, tokenId: number, orderIds: string[], mode: BorosMarginMode = 'cross'): Promise<void> {
