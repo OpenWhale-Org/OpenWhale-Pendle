@@ -35,9 +35,13 @@ export interface BorosMarketSummary {
   tokenId: number
   maturity: number
   platform: string
+  /** The venue refuses cross-margin orders here — isolated is the only option. */
+  isolatedOnly: boolean
 }
 
 export type BorosSide = 'long' | 'short'
+/** Which margin account an order/position lives in: the token's cross account, or the market's isolated one. */
+export type BorosMarginMode = 'cross' | 'isolated'
 
 /** A market's live rate picture — APRs as decimals (0.068 = 6.8%). */
 export interface BorosMarketQuote {
@@ -98,6 +102,24 @@ function normalizeKey(key: string): `0x${string}` {
 }
 
 /**
+ * The SDK surfaces HTTP failures as bare axios errors ("Request failed with
+ * status code 400") — the venue's actual reason lives in the response body.
+ * Re-throw with it attached so executions record why.
+ */
+async function withVenueError<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    const e = err as { response?: { status?: number; data?: unknown }; message?: string }
+    if (e?.response) {
+      const body = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data)
+      throw new Error(`Boros API ${e.response.status ?? ''}: ${body?.slice(0, 600)}`)
+    }
+    throw err
+  }
+}
+
+/**
  * The (boros/rates, boros) cell's session. Trading actions are signed by the
  * AGENT key and relayed by Boros's Send Txs Bot (gas debited from the
  * account's on-chain USD gas balance) — the root wallet's private key never
@@ -140,7 +162,7 @@ export class BorosSession {
     const rows = (res.results ?? []) as unknown as Array<{
       marketId: number
       tokenId: number
-      imData: { symbol: string; maturity: number }
+      imData: { symbol: string; maturity: number; isIsolatedOnly?: boolean }
       metadata?: { fundingRateSymbol?: string }
       platform?: unknown
     }>
@@ -150,6 +172,7 @@ export class BorosSession {
       tokenId: m.tokenId,
       maturity: m.imData.maturity,
       platform: m.imData.symbol.split('-')[0] ?? String(m.platform ?? ''),
+      isolatedOnly: m.imData.isIsolatedOnly === true,
     }))
   }
 
@@ -170,6 +193,7 @@ export class BorosSession {
       marketId: m.marketId,
       tokenId: m.tokenId,
       maturity: m.maturity,
+      isolatedOnly: m.isolatedOnly,
     }))
   }
 
@@ -297,16 +321,19 @@ export class BorosSession {
     return this.requireExchange().getAgentExpiryTime()
   }
 
-  private marketAcc(tokenId: number): `0x${string}` {
+  /** The margin account for (token, mode): cross packs the CROSS sentinel, isolated packs the market id. */
+  private marketAcc(tokenId: number, mode: BorosMarginMode = 'cross', marketId?: number): `0x${string}` {
     this.requireExchange()
-    return MarketAccLib.pack(this.rootAddress!, this.accountId, tokenId, CROSS_MARKET_ID) as `0x${string}`
+    if (mode === 'isolated' && marketId === undefined) throw new Error('isolated marketAcc needs the marketId')
+    return MarketAccLib.pack(this.rootAddress!, this.accountId, tokenId, mode === 'isolated' ? marketId! : CROSS_MARKET_ID) as `0x${string}`
   }
 
   /** Cross-margin entry into a market is a one-time on-chain step; idempotent here. */
-  async ensureEntered(marketId: number, tokenId: number): Promise<void> {
+  async ensureEntered(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<void> {
+    if (mode === 'isolated') return   // isolated accounts have no entry step
     const entered = await this.enteredMarkets(tokenId)
     if (entered.includes(marketId)) return
-    await this.requireExchange().enterMarkets(true, [marketId])
+    await withVenueError(() => this.requireExchange().enterMarkets(true, [marketId]))
   }
 
   /**
@@ -314,11 +341,11 @@ export class BorosSession {
    * from the contract. Isolated orders belong to whoever placed them by hand
    * on the venue UI and are never touched by automation.
    */
-  async restingOrders(marketId: number, tokenId: number): Promise<BorosOpenOrder[]> {
-    const cross = this.marketAcc(tokenId).toLowerCase()
+  async restingOrders(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<BorosOpenOrder[]> {
+    const own = this.marketAcc(tokenId, mode, marketId).toLowerCase()
     const { results } = await this.requireExchange().getActiveOrdersFromContract({ marketId, tokenId })
     return results
-      .filter(o => o.marketAcc.toLowerCase() === cross)
+      .filter(o => o.marketAcc.toLowerCase() === own)
       .map(o => ({
         orderId: o.orderId.toString(),
         marketId,
@@ -326,15 +353,15 @@ export class BorosSession {
         apr: o.impliedApr,
         sizeYu: toYu(o.size),
         unfilledYu: toYu(o.unfilledSize),
-        isCross: true,
+        isCross: mode === 'cross',
       }))
   }
 
   /** The strategy's position on a market — CROSS account only (see restingOrders). */
-  async crossPosition(marketId: number, tokenId: number): Promise<{ signedSizeYu: number; positionValue: number } | undefined> {
-    const cross = this.marketAcc(tokenId).toLowerCase()
+  async crossPosition(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<{ signedSizeYu: number; positionValue: number } | undefined> {
+    const own = this.marketAcc(tokenId, mode, marketId).toLowerCase()
     const positions = await this.requireExchange().getUserPositions({ marketId, tokenId })
-    const p = positions.find(x => x.marketId === marketId && x.marketAcc.toLowerCase() === cross)
+    const p = positions.find(x => x.marketId === marketId && x.marketAcc.toLowerCase() === own)
     if (!p) return undefined
     return { signedSizeYu: toYu(p.signedSize), positionValue: toYu(p.positionValue) }
   }
@@ -345,38 +372,42 @@ export class BorosSession {
    * Post-only resting order at an APR: ADD_LIQUIDITY_ONLY is rejected rather
    * than crossed, so a maker-reward order can never accidentally take.
    */
-  async placeMakerOrder(args: { marketId: number; tokenId: number; side: BorosSide; sizeYu: number; apr: number }): Promise<Record<string, unknown>> {
-    const result = await this.requireExchange().placeOrder({
-      marketAcc: this.marketAcc(args.tokenId),
+  async placeMakerOrder(args: { marketId: number; tokenId: number; side: BorosSide; sizeYu: number; apr: number; mode?: BorosMarginMode }): Promise<Record<string, unknown>> {
+    const result = await withVenueError(() => this.requireExchange().placeOrder({
+      marketAcc: this.marketAcc(args.tokenId, args.mode ?? 'cross', args.marketId),
       marketId: args.marketId,
       side: args.side === 'long' ? Side.LONG : Side.SHORT,
       size: fromYu(args.sizeYu),
       rate: args.apr,
+      // The calldata builder insists on exactly one of slippage/desiredRate even
+      // for a resting limit; 0 slippage is the honest value for a post-only order
+      slippage: 0,
       tif: TimeInForce.ADD_LIQUIDITY_ONLY,
-    })
+    }))
     return result as unknown as Record<string, unknown>
   }
 
   /** Immediate-or-cancel order at an aggressive APR — the flatten path after an accidental fill. */
-  async takerOrder(args: { marketId: number; tokenId: number; side: BorosSide; sizeYu: number; apr: number }): Promise<Record<string, unknown>> {
-    const result = await this.requireExchange().placeOrder({
-      marketAcc: this.marketAcc(args.tokenId),
+  async takerOrder(args: { marketId: number; tokenId: number; side: BorosSide; sizeYu: number; apr: number; mode?: BorosMarginMode }): Promise<Record<string, unknown>> {
+    const result = await withVenueError(() => this.requireExchange().placeOrder({
+      marketAcc: this.marketAcc(args.tokenId, args.mode ?? 'cross', args.marketId),
       marketId: args.marketId,
       side: args.side === 'long' ? Side.LONG : Side.SHORT,
       size: fromYu(args.sizeYu),
       rate: args.apr,
+      slippage: 0,
       tif: TimeInForce.IMMEDIATE_OR_CANCEL,
-    })
+    }))
     return result as unknown as Record<string, unknown>
   }
 
-  async cancelOrders(marketId: number, tokenId: number, orderIds: string[]): Promise<void> {
+  async cancelOrders(marketId: number, tokenId: number, orderIds: string[], mode: BorosMarginMode = 'cross'): Promise<void> {
     if (orderIds.length === 0) return
-    await this.requireExchange().cancelOrders({ marketAcc: this.marketAcc(tokenId), marketId, cancelAll: false, orderIds })
+    await withVenueError(() => this.requireExchange().cancelOrders({ marketAcc: this.marketAcc(tokenId, mode, marketId), marketId, cancelAll: false, orderIds }))
   }
 
-  async cancelAll(marketId: number, tokenId: number): Promise<void> {
-    await this.requireExchange().cancelOrders({ marketAcc: this.marketAcc(tokenId), marketId, cancelAll: true, orderIds: [] })
+  async cancelAll(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<void> {
+    await withVenueError(() => this.requireExchange().cancelOrders({ marketAcc: this.marketAcc(tokenId, mode, marketId), marketId, cancelAll: true, orderIds: [] }))
   }
 
   async close(): Promise<void> {

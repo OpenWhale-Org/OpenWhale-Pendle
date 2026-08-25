@@ -1,5 +1,5 @@
 import { OwAccount } from '@openwhaleorg/core'
-import type { BorosSession, BorosOpenOrder, BorosMarketQuote } from './session.js'
+import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode } from './session.js'
 
 /**
  * Read-only view of a Boros account — the 'pendle/rates' kind's canonical
@@ -104,12 +104,12 @@ export class BorosRatesAccount {
   }
 
   /** Per-market reads a maker strategy lives on — the CROSS account only. */
-  restingOrders(marketId: number, tokenId: number): Promise<BorosOpenOrder[]> {
-    return this.session.restingOrders(marketId, tokenId)
+  restingOrders(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<BorosOpenOrder[]> {
+    return this.session.restingOrders(marketId, tokenId, mode)
   }
 
-  crossPosition(marketId: number, tokenId: number): Promise<{ signedSizeYu: number; positionValue: number } | undefined> {
-    return this.session.crossPosition(marketId, tokenId)
+  crossPosition(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<{ signedSizeYu: number; positionValue: number } | undefined> {
+    return this.session.crossPosition(marketId, tokenId, mode)
   }
 
   gasBalance(): Promise<number> {
