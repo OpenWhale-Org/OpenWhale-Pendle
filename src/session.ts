@@ -1,7 +1,7 @@
 import { createWalletClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { arbitrum } from 'viem/chains'
-import { Agent, Exchange, getOpenApiSdk, MarketAccLib, CROSS_MARKET_ID, Side, TimeInForce } from '@pendle/boros-sdk-public'
+import { Agent, Exchange, getOpenApiSdk, MarketAccLib, OrderIdLib, CROSS_MARKET_ID, Side, TimeInForce } from '@pendle/boros-sdk-public'
 
 const DEFAULT_RPC = 'https://arb1.arbitrum.io/rpc'
 
@@ -40,6 +40,15 @@ export interface BorosMarketSummary {
 }
 
 export type BorosSide = 'long' | 'short'
+
+/** What one relayed batch did — every call's outcome, one tx hash. */
+export interface BorosBatchResult {
+  cancelled: string[]
+  placed: Array<{ orderId: string; side: BorosSide; sizeYu: number }>
+  /** Per-call venue errors (the batch itself still landed). */
+  errors: string[]
+  txHash?: string
+}
 /** Which margin account an order/position lives in: the token's cross account, or the market's isolated one. */
 export type BorosMarginMode = 'cross' | 'isolated'
 
@@ -427,6 +436,73 @@ export class BorosSession {
 
   async cancelAll(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<void> {
     await withVenueError(() => this.requireExchange().cancelOrders({ marketAcc: this.marketAcc(tokenId, mode, marketId), marketId, cancelAll: true, orderIds: [] }))
+  }
+
+  /**
+   * Cancel + place in ONE relayed transaction. The relay wraps every signed
+   * call into a single tryAggregate tx, so a two-sided re-quote (cancel both,
+   * rest both) is one gas charge instead of four. Calls run in order —
+   * cancels first, so their margin is free when the new orders are checked.
+   * Per-call failures are reported, not thrown (requireSuccess=false): a
+   * cancel of an already-gone id must not sink the places behind it.
+   */
+  async batchRequote(args: {
+    marketId: number
+    tokenId: number
+    mode?: BorosMarginMode
+    cancelIds: string[]
+    orders: Array<{ side: BorosSide; sizeYu: number; apr: number }>
+  }): Promise<BorosBatchResult> {
+    const mode = args.mode ?? 'cross'
+    const marketAcc = this.marketAcc(args.tokenId, mode, args.marketId)
+    const builder = this.api.calldataBuilderAgentExecutable
+    const calldatas: `0x${string}`[] = []
+    if (args.cancelIds.length > 0) {
+      const { data } = await withVenueError(() => builder.calldataBuilderAgentControllerBuildCancelOrders({
+        markets: [{ marketAcc, marketId: args.marketId, cancelAll: false, orderIds: args.cancelIds }],
+      }))
+      calldatas.push(...data.calls.map(c => c.calldata as `0x${string}`))
+    }
+    if (args.orders.length > 0) {
+      const { data } = await withVenueError(() => builder.calldataBuilderAgentControllerBuildPlaceOrders({
+        orderRequests: args.orders.map(o => ({
+          singleOrder: {
+            marketAcc,
+            marketId: args.marketId,
+            side: o.side === 'long' ? Side.LONG : Side.SHORT,
+            size: fromYu(o.sizeYu).toString(),
+            rate: o.apr,
+            slippage: 0,
+            tif: TimeInForce.ADD_LIQUIDITY_ONLY,
+            ammId: 0,
+          },
+        })),
+      }))
+      calldatas.push(...data.calls.map(c => c.calldata as `0x${string}`))
+    }
+    if (calldatas.length === 0) return { cancelled: [], placed: [], errors: [] }
+
+    const responses = await withVenueError(() => this.requireExchange().bulkSignAndExecute(calldatas, undefined, false)) as unknown as Array<{
+      error?: string
+      executeResponse?: { txHash?: string }
+      events?: Array<{ eventName?: string; args?: { orderIds?: bigint[]; sizes?: bigint[] } }>
+    }>
+    const out: BorosBatchResult = { cancelled: [], placed: [], errors: [] }
+    for (const r of responses) {
+      if (r.error) { out.errors.push(r.error); continue }
+      if (out.txHash === undefined && r.executeResponse?.txHash) out.txHash = r.executeResponse.txHash
+      for (const ev of r.events ?? []) {
+        if (ev.eventName === 'LimitOrderCancelled') out.cancelled.push(...(ev.args?.orderIds ?? []).map(String))
+        if (ev.eventName === 'LimitOrderPlaced') {
+          const ids = ev.args?.orderIds ?? []
+          ids.forEach((id, i) => {
+            const { side } = OrderIdLib.unpack(id)
+            out.placed.push({ orderId: String(id), side: side === Side.LONG ? 'long' : 'short', sizeYu: toYu(ev.args?.sizes?.[i] ?? 0n) })
+          })
+        }
+      }
+    }
+    return out
   }
 
   async close(): Promise<void> {

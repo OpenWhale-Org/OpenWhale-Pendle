@@ -1,10 +1,11 @@
 export { BorosSession } from './session.js'
-export type { BorosSessionOptions, BorosMarketSummary, MakerCampaign, MakerCampaignSide, BorosSide, BorosMarginMode, BorosMarketQuote, BorosBook, BorosBookLevel, BorosOpenOrder, BorosPosition, BorosAccountInfo } from './session.js'
+export type { BorosSessionOptions, BorosMarketSummary, MakerCampaign, MakerCampaignSide, BorosSide, BorosMarginMode, BorosMarketQuote, BorosBook, BorosBookLevel, BorosOpenOrder, BorosPosition, BorosAccountInfo, BorosBatchResult } from './session.js'
 export { BorosRatesAccount } from './account.js'
 export { PendleMarketSession, PendleMarketAccount } from './market.js'
 export type { PendleValuation } from './market.js'
 export { borosAgentCredentialType } from './credentialType.js'
 export { pendlePlugin } from './plugin.js'
+export { PENDLE_LOGO } from './brand.js'
 
 // Kind contracts — merged into core's kind table
 import type { BorosSession as BorosSessionClass } from './session.js'
