@@ -35,8 +35,8 @@ const log = createLogger('BorosMaker')
  */
 
 const decls = {
-  monitors: [{ name: 'pendle-maker/market-watch', label: 'watch' }],
-  executors: [{ name: 'pendle-maker/maker', label: 'maker' }],
+  monitors: [{ name: 'pendle-strategy/market-watch', label: 'watch' }],
+  executors: [{ name: 'pendle-strategy/maker', label: 'maker' }],
   accounts: [{ account: BorosRatesAccount, label: 'boros' }],
 } as const satisfies StrategyDeclarations
 

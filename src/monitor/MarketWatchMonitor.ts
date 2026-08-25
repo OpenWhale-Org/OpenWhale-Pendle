@@ -4,7 +4,7 @@ import type { MonitorContext, AdapterResolver, MonitorPlotDef, MonitorRecord } f
 import type { BorosSession, BorosBookLevel } from '@jarei/openwhale-pendle'
 
 /**
- * pendle-maker/market-watch — one Boros market's maker picture, polled
+ * pendle-strategy/market-watch — one Boros market's maker picture, polled
  * keyless: mid/mark APR, the incentive band per side (campaign), the pools
  * we'd share the budget with, and how much size already rests near each
  * band edge. Key = marketId. This is the strategy's only trigger.

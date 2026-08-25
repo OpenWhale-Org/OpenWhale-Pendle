@@ -4,7 +4,7 @@ import type { ExecutionInstruction, ExecutionResult, ExecutorCredentialSlot } fr
 import type { BorosSession, BorosSide, BorosBatchResult } from '@jarei/openwhale-pendle'
 
 /**
- * pendle-maker/maker — the write half of the maker-reward loop over one
+ * pendle-strategy/maker — the write half of the maker-reward loop over one
  * Boros account slot. Every action is idempotent from the venue's point of
  * view: `quote` re-reads the account's resting orders on that side before it
  * cancels and re-places, so a retried instruction converges instead of

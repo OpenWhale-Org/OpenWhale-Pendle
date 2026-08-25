@@ -1,4 +1,4 @@
-# openwhale-pendle-maker（中文说明）
+# OpenWhale Pendle Strategy（中文说明）
 
 OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场：在每一侧激励带的最远边缘挂一张 post-only 单，随中间隐含 APR 的移动跟着带走，按自己在带内流动性中的份额领取该侧的每小时预算。
 
@@ -54,7 +54,7 @@ OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场�
 | `gasFloorUsd` | `3` | 中继动作从账户链上的 USD gas 余额扣费。低于此值暂停挂单（余额耗尽时场地会静默失败）。 |
 | `flattenSlippage` | `0.02` | 意外成交后，平仓 IOC 可以越过盘口多远，按 APR 比例。 |
 
-## 执行器动作（`pendle-maker/maker`）
+## 执行器动作（`pendle-strategy/maker`）
 
 策略的所有动作都走这个执行器；看板的 **Manual fire** 暴露同一组动作。公共字段：
 

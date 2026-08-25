@@ -1,4 +1,4 @@
-# openwhale-pendle-maker
+# OpenWhale Pendle Strategy
 
 Boros maker-reward strategy for [OpenWhale](https://github.com/openwhaleorg/openwhale). One instance quotes one Boros market: it rests a post-only order at the far edge of each side's maker-incentive band, follows the band as the mid implied APR moves, and earns the campaign's hourly budget in proportion to its share of in-band liquidity.
 
@@ -56,7 +56,7 @@ At steady state the strategy holds at most one order per side: **two orders in `
 | `gasFloorUsd` | `3` | Relayed actions are paid from the account's on-chain USD gas balance. Below this, quoting pauses (an empty balance fails silently on the venue). |
 | `flattenSlippage` | `0.02` | After an accidental fill, how far past the touch the flatten IOC may reach, as a fraction of APR. |
 
-## Executor actions (`pendle-maker/maker`)
+## Executor actions (`pendle-strategy/maker`)
 
 Everything the strategy does goes through this executor; the dashboard's **Manual fire** exposes the same actions. Common fields:
 

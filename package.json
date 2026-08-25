@@ -1,8 +1,8 @@
 {
-  "name": "@jarei/openwhale-pendle-maker",
+  "name": "@jarei/openwhale-pendle-strategy",
   "version": "0.1.0",
   "private": true,
-  "description": "Boros maker-reward strategy for OpenWhale — rests post-only orders at the incentive band's far edge; lives OUTSIDE the framework repo on purpose",
+  "description": "OpenWhale Pendle Strategy — Pendle / Boros strategies for OpenWhale (maker rewards first); lives OUTSIDE the framework repo on purpose",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

@@ -5,18 +5,18 @@ import { MakerStrategy } from './strategy/MakerStrategy.js'
 import { PENDLE_LOGO } from '@jarei/openwhale-pendle'
 
 /**
- * pendle-maker — the Boros maker-reward strategy package. Depends on the
+ * pendle-strategy — OpenWhale Pendle Strategy: Pendle / Boros strategies (maker rewards first). Depends on the
  * pendle venue plugin (kind 'pendle/rates', the agent credential, the
  * BorosSession trading surface) and on nothing else venue-wise.
  */
 export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
   const now = new Date().toISOString()
   return {
-    name: 'pendle-maker',
+    name: 'pendle-strategy',
     version: '0.1.0',
     logo: PENDLE_LOGO,
     readme: [
-      '# pendle-maker',
+      '# OpenWhale Pendle Strategy',
       '',
       'Farms Boros **maker incentives**: rests post-only orders at the far edge of each side\'s incentive band and follows the band as mid moves. Reward per hour = the side\'s budget × our share of in-band liquidity — the band is not distance-weighted, so the edge earns what the touch earns at a fraction of the fill risk.',
       '',
@@ -53,7 +53,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
           name: 'Boros Maker Executor',
           description: 'Idempotent requote / quote / cancel / flatten over one Boros account. requote cancels and re-rests any number of sides in ONE relayed transaction; flatten IOCs the deviation after an accidental fill. simulate* variants log without sending.',
           source: 'plugin',
-          pluginName: 'pendle-maker',
+          pluginName: 'pendle-strategy',
           supportedActions: ['requote', 'quote', 'cancel', 'flatten', 'simulateRequote', 'simulateQuote', 'simulateCancel', 'simulateFlatten'],
           createdAt: now,
           updatedAt: now,
@@ -68,7 +68,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
           name: 'Boros Maker Rewards',
           description: 'Rests post-only orders at the far edge of the Boros maker-incentive band on both sides and follows the band as mid moves; an accidental fill is flattened at once; one instance per market; starts in dry run.',
           source: 'plugin',
-          pluginName: 'pendle-maker',
+          pluginName: 'pendle-strategy',
           accountRequirements: [{ label: 'boros', kind: 'pendle/rates' }],
           createdAt: now,
           updatedAt: now,
