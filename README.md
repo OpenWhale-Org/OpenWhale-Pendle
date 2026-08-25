@@ -12,7 +12,7 @@ Both depend on `@openwhaleorg/core` (and the venue plugin on `@openwhaleorg/web3
 ## Develop
 
 ```sh
-pnpm install     # links @openwhaleorg/core and web3 from a sibling OpenWhale checkout (see devDependencies)
+pnpm install:all   # each package installs on its own — no workspace hoisting, see .npmrc
 pnpm build
 pnpm test
 ```

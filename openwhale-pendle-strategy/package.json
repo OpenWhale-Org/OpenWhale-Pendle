@@ -1,6 +1,6 @@
 {
   "name": "@openwhaleorg/pendle-strategy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenWhale Pendle Strategy — Pendle / Boros strategies for OpenWhale (Boros maker rewards first)",
   "license": "MIT",
   "type": "module",
@@ -31,16 +31,22 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^4.4.1",
-    "@openwhaleorg/pendle": "workspace:^"
+    "zod": "^4.4.1"
   },
   "peerDependencies": {
-    "@openwhaleorg/core": "^0.2.0"
+    "@openwhaleorg/core": "^0.2.0",
+    "@openwhaleorg/pendle": "^0.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "5.4.5",
     "vitest": "^1.6.0",
-    "@openwhaleorg/core": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core"
+    "@openwhaleorg/core": "link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core",
+    "@openwhaleorg/pendle": "link:../openwhale-pendle"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod": "4.4.1"
+    }
   }
 }

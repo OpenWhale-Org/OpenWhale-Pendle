@@ -3,17 +3,9 @@
   "private": true,
   "description": "Workspace for the OpenWhale Pendle packages: the venue plugin and the strategy package",
   "scripts": {
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
-    "clean": "pnpm -r clean"
-  },
-  "pnpm": {
-    "overrides": {
-      "zod": "4.4.1"
-    }
-  },
-  "devDependencies": {
-    "typescript": "5.4.5"
+    "install:all": "pnpm -C openwhale-pendle install && pnpm -C openwhale-pendle-strategy install",
+    "build": "pnpm -C openwhale-pendle build && pnpm -C openwhale-pendle-strategy build",
+    "typecheck": "pnpm -C openwhale-pendle typecheck && pnpm -C openwhale-pendle-strategy typecheck",
+    "test": "pnpm -C openwhale-pendle test && pnpm -C openwhale-pendle-strategy test"
   }
 }

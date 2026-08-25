@@ -10,12 +10,6 @@ overrides:
 importers:
 
   .:
-    devDependencies:
-      typescript:
-        specifier: 5.4.5
-        version: 5.4.5
-
-  openwhale-pendle:
     dependencies:
       '@pendle/boros-sdk-public':
         specifier: ^0.3.1
@@ -42,28 +36,6 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.23.12
-      typescript:
-        specifier: 5.4.5
-        version: 5.4.5
-      vitest:
-        specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.43)
-
-  openwhale-pendle-strategy:
-    dependencies:
-      '@openwhaleorg/pendle':
-        specifier: workspace:^
-        version: link:../openwhale-pendle
-      zod:
-        specifier: 4.4.1
-        version: 4.4.1
-    devDependencies:
-      '@openwhaleorg/core':
-        specifier: link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core
-        version: link:../../../Paratrix/AI/gmtown/openwhale/packages/framework/core
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.43
       typescript:
         specifier: 5.4.5
         version: 5.4.5
