@@ -18,6 +18,10 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
     readme: [
       '# OpenWhale Pendle Strategy',
       '',
+      'An open-source collection of Pendle / Boros strategies. Shipping today: **Boros Maker Rewards** (`boros-maker`); more to follow.',
+      '',
+      '## Boros Maker Rewards',
+      '',
       'Farms Boros **maker incentives**: rests post-only orders at the far edge of each side\'s incentive band and follows the band as mid moves. Reward per hour = the side\'s budget × our share of in-band liquidity — the band is not distance-weighted, so the edge earns what the touch earns at a fraction of the fill risk.',
       '',
       '## Run it',

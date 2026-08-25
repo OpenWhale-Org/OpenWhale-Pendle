@@ -1,10 +1,45 @@
 # OpenWhale Pendle Strategy（中文说明）
 
-OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场：在每一侧激励带的最远边缘挂一张 post-only 单，随中间隐含 APR 的移动跟着带走，按自己在带内流动性中的份额领取该侧的每小时预算。
+一个开源的 [Pendle](https://www.pendle.finance) 策略集合 —— 覆盖 Pendle V2（PT/YT 市场）和 Boros（利率互换），基于 [OpenWhale](https://github.com/OpenWhale-Org/OpenWhale) 框架。每个策略都是一个插件组件：把包装进运行中的网关，在看板上创建实例，调度、账户、执行和可观测性由框架负责。
 
-依赖 `pendle` 场地插件（`@openwhaleorg/pendle`）：Boros Agent 凭证、`pendle/rates` 账户、交易会话。
+npm 包名 `@openwhaleorg/pendle-strategy`。依赖场地插件 [`@openwhaleorg/pendle`](../openwhale-pendle)（凭证、账户、交易会话）和 `@openwhaleorg/core`。
 
-## 工作原理
+## 策略列表
+
+| 策略 | 产品 | 状态 | 一句话 |
+|---|---|---|---|
+| [Boros 挂单奖励](#1-boros-挂单奖励) | Boros | **已上线** | 在市场激励带最远边缘挂 post-only 单并跟随激励带移动，按带内流动性份额领取每小时预算 |
+| Boros 资金费基差 | Boros | 规划中 | Boros 固定利率 vs 永续场地浮动资费的 carry |
+| Pendle PT/YT 收益轮动 | Pendle V2 | 规划中 | 按隐含收益 vs 实际收益在 PT 与 YT 间轮动 |
+| Pendle LP 激励挖矿 | Pendle V2 | 规划中 | 激励高于无常收益风险时做 LP |
+
+"规划中"表示方向，不是承诺；欢迎开 issue 讨论。
+
+## 安装
+
+1. 在看板 **Plugins** 页先装 `@openwhaleorg/pendle`，再装 `@openwhaleorg/pendle-strategy`（填 npm 包名，或本地 checkout 的绝对路径）。
+2. 按各策略的"准备"一节创建凭证和账户。
+3. **Strategies → New strategy**，选策略、填参数、激活。
+
+## 开发
+
+```sh
+pnpm install     # 在 workspace 根目录执行 —— 从同级的 OpenWhale checkout 链接 @openwhaleorg/core
+pnpm build
+pnpm test
+```
+
+源码只用英文；本 README 是英文版的中文对照。贡献遵循 OpenWhale 插件约定（框架仓库的 `skills/openwhale-dev`）。
+
+---
+
+## 1. Boros 挂单奖励
+
+`pendle-strategy/boros-maker` · 监控 `pendle-strategy/market-watch` · 执行器 `pendle-strategy/maker`
+
+一个实例只做一个 Boros 市场：在每一侧激励带的最远边缘挂一张 post-only 单，随中间隐含 APR 的移动跟着带走，按自己在带内流动性中的份额领取该侧的每小时预算。
+
+### 工作原理
 
 - **激励带。** 每个市场的每一侧（long / short）可能有一个 maker 激励活动：每小时的预算发给挂在中间 APR `±range` 范围内的订单。距离不加权 —— 带内每一 YU 拿到的一样多。
 - **走廊。** 策略挂在离 mid `edgeRatio × range` 的位置（最远边缘：成交风险最低，奖励一样）。只要订单到 mid 的距离还在 `[safeDistanceRatio × range, range]` 内就不动它；只有订单漂出带外、或 mid 逼近到安全线以内时才重挂。
@@ -14,16 +49,16 @@ OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场�
 
 稳态下每侧最多一张单：**`both` 模式 2 张，`long` / `short` 模式 1 张** —— 基线里的不算。
 
-## 准备
+### 准备
 
 1. 在 pendle 插件里创建 **Boros Agent** 凭证（root 地址 + agent 私钥 + 子账户 id），再基于它建一个 `pendle/rates` 账户。
 2. 把保证金充进要做的市场，并给账户的 **gas 余额** 充值（Boros UI → Gas）。充值永远不自动化。
 3. 跑 pendle 插件的 **Scan maker incentives** 脚本，挑一个预算在线、池子小的市场。
 4. 创建策略实例、选市场，先保持 **Dry run** 开着看日志，确认后再关掉。
 
-## 策略参数
+### 策略参数
 
-### 基础
+#### 基础
 
 | 参数 | 默认 | 含义 |
 |---|---|---|
@@ -32,14 +67,14 @@ OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场�
 | `marginMode` | `auto` | 订单放在哪个保证金账户。`auto`：市场被标记为仅逐仓时用 isolated，否则 cross。读取、撤单、基线快照都限定在这个账户。 |
 | `baselineSnapshot` | `true` | 激活时记录账户在该市场已有的仓位和挂单，之后不碰它们。尽力而为 —— 激活之后手动下的单会被当成意外成交而平掉。关掉 = 市场上的一切都视为策略自己的。 |
 
-### 规模
+#### 规模
 
 | 参数 | 默认 | 含义 |
 |---|---|---|
 | `sizeYu` | `10` | 每侧挂单量（YU；1 YU = 1 单位抵押币的资金费名义）。每侧奖励份额 = `sizeYu / (池子 + sizeYu)`。 |
 | `sides` | `both` | `both` 每侧一张；`long` / `short` 只做一侧。每侧有各自的预算和池子。 |
 
-### 走廊
+#### 走廊
 
 | 参数 | 默认 | 含义 |
 |---|---|---|
@@ -47,14 +82,14 @@ OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场�
 | `safeDistanceRatio` | `0.3` | 内线。mid 逼近到不足这个比例的半带宽时，把单重挂回边缘 —— 越靠近盘口成交风险越高。 |
 | `requoteIntervalMs` | `30000` | 每侧两次发单的最小间隔，挂单和重挂都受限。合约读数比中继滞后几秒，低于 ~15 s 可能把刚挂的单再挂一次。 |
 
-### 风控
+#### 风控
 
 | 参数 | 默认 | 含义 |
 |---|---|---|
 | `gasFloorUsd` | `3` | 中继动作从账户链上的 USD gas 余额扣费。低于此值暂停挂单（余额耗尽时场地会静默失败）。 |
 | `flattenSlippage` | `0.02` | 意外成交后，平仓 IOC 可以越过盘口多远，按 APR 比例。 |
 
-## 执行器动作（`pendle-strategy/maker`）
+### 执行器动作（`pendle-strategy/maker`）
 
 策略的所有动作都走这个执行器；看板的 **Manual fire** 暴露同一组动作。公共字段：
 

@@ -1,12 +1,47 @@
 # OpenWhale Pendle Strategy
 
-Boros maker-reward strategy for [OpenWhale](https://github.com/openwhaleorg/openwhale). One instance quotes one Boros market: it rests a post-only order at the far edge of each side's maker-incentive band, follows the band as the mid implied APR moves, and earns the campaign's hourly budget in proportion to its share of in-band liquidity.
+An open-source collection of trading strategies for [Pendle](https://www.pendle.finance) — Pendle V2 (PT/YT markets) and Boros (interest-rate swaps) — built on the [OpenWhale](https://github.com/OpenWhale-Org/OpenWhale) framework. Each strategy is a plugin component: install the package into a running gateway, create an instance from the Dashboard, and the framework handles scheduling, accounts, execution and observability.
 
-Depends on the `pendle` venue plugin (`@openwhaleorg/pendle`) for the Boros agent credential, the `pendle/rates` account and the trading session.
+Published as `@openwhaleorg/pendle-strategy`. Depends on the [`@openwhaleorg/pendle`](../openwhale-pendle) venue plugin (credentials, accounts, trading sessions) and `@openwhaleorg/core`.
 
 [中文说明 →](./README.zh-CN.md)
 
-## How it works
+## Strategies
+
+| Strategy | Product | Status | Summary |
+|---|---|---|---|
+| [Boros Maker Rewards](#1-boros-maker-rewards) | Boros | **Live** | Rests post-only orders at the far edge of a market's maker-incentive band and follows the band; earns the hourly budget in proportion to in-band liquidity |
+| Boros funding-rate basis | Boros | Planned | Fixed-vs-floating funding carry across Boros and a perp venue |
+| Pendle PT/YT yield rotation | Pendle V2 | Planned | Rotate between PT and YT on implied-vs-realised yield |
+| Pendle LP incentive farming | Pendle V2 | Planned | LP where incentives beat impermanent-yield risk |
+
+Planned entries are direction, not commitment — open an issue to discuss one.
+
+## Install
+
+1. From the Dashboard's **Plugins** page install `@openwhaleorg/pendle` first, then `@openwhaleorg/pendle-strategy` (by npm name, or by the absolute path of a local checkout).
+2. Create the credentials and accounts the strategy needs (see each strategy's setup below).
+3. **Strategies → New strategy**, pick the strategy, fill its parameters, activate.
+
+## Develop
+
+```sh
+pnpm install     # from the workspace root — links @openwhaleorg/core from a sibling OpenWhale checkout
+pnpm build
+pnpm test
+```
+
+Source is English-only; this README has a Chinese twin. Contributions follow the OpenWhale plugin conventions (`skills/openwhale-dev` in the framework repository).
+
+---
+
+## 1. Boros Maker Rewards
+
+`pendle-strategy/boros-maker` · monitor `pendle-strategy/market-watch` · executor `pendle-strategy/maker`
+
+One instance quotes one Boros market: it rests a post-only order at the far edge of each side's maker-incentive band, follows the band as the mid implied APR moves, and earns the campaign's hourly budget in proportion to its share of in-band liquidity.
+
+### How it works
 
 - **Band.** Each market side (long / short) may run a maker-incentive campaign: an hourly budget paid to orders resting within `±range` of the mid implied APR. Distance does not matter — every YU in band earns the same.
 - **Corridor.** The strategy rests at `edgeRatio × range` from mid (the far edge — least fill risk, same reward). It leaves the order alone while its distance to mid stays inside `[safeDistanceRatio × range, range]`, and re-quotes only when the order drifts out of the band or mid comes too close.
@@ -16,16 +51,16 @@ Depends on the `pendle` venue plugin (`@openwhaleorg/pendle`) for the Boros agen
 
 At steady state the strategy holds at most one order per side: **two orders in `both` mode, one in `long` / `short` mode** — plus whatever the baseline holds.
 
-## Setup
+### Setup
 
 1. Create a **Boros Agent** credential in the pendle plugin (root address + agent key + sub-account id) and a `pendle/rates` account on it.
 2. Deposit collateral into the market you want to quote and top up the account's **gas balance** (Boros UI → Gas). Deposits are never automated.
 3. Run the pendle plugin's **Scan maker incentives** script to find a market with a live budget and a small pool.
 4. Create a strategy instance, pick the market, leave **Dry run** on, watch the logs, then switch it off.
 
-## Strategy parameters
+### Strategy parameters
 
-### Base
+#### Base
 
 | Param | Default | Meaning |
 |---|---|---|
@@ -34,14 +69,14 @@ At steady state the strategy holds at most one order per side: **two orders in `
 | `marginMode` | `auto` | Which margin account the orders live in. `auto` = isolated when the venue marks the market isolated-only, else cross. Reads, cancels and the baseline snapshot are scoped to this account. |
 | `baselineSnapshot` | `true` | Record the position and resting orders the account already holds at activation and never touch them. Best effort — a manual trade *after* activation looks like a fill and gets flattened. Off = everything on the market is treated as the strategy's own. |
 
-### Size
+#### Size
 
 | Param | Default | Meaning |
 |---|---|---|
 | `sizeYu` | `10` | Order size per side in YU (1 YU = 1 unit of the collateral token of funding notional). Reward share per side = `sizeYu / (pool + sizeYu)`. |
 | `sides` | `both` | `both` rests one order per side; `long` / `short` only that side. Each side has its own budget and pool. |
 
-### Corridor
+#### Corridor
 
 | Param | Default | Meaning |
 |---|---|---|
@@ -49,14 +84,14 @@ At steady state the strategy holds at most one order per side: **two orders in `
 | `safeDistanceRatio` | `0.3` | Inner line. When mid comes closer than this fraction of the half-width, the order is re-quoted back to the edge — fill risk rises fast near the touch. |
 | `requoteIntervalMs` | `30000` | Minimum time between emissions per side, for placing *and* re-quoting. The contract read lags the relay by a few seconds; below ~15 s a fresh order can be placed twice. |
 
-### Risk
+#### Risk
 
 | Param | Default | Meaning |
 |---|---|---|
 | `gasFloorUsd` | `3` | Relayed actions are paid from the account's on-chain USD gas balance. Below this, quoting pauses (an empty balance fails silently on the venue). |
 | `flattenSlippage` | `0.02` | After an accidental fill, how far past the touch the flatten IOC may reach, as a fraction of APR. |
 
-## Executor actions (`pendle-strategy/maker`)
+### Executor actions (`pendle-strategy/maker`)
 
 Everything the strategy does goes through this executor; the dashboard's **Manual fire** exposes the same actions. Common fields:
 
@@ -77,7 +112,7 @@ Everything the strategy does goes through this executor; the dashboard's **Manua
 
 `apr` is a decimal implied APR (`0.068` = 6.8 %, negatives are allowed). `sizeYu` is in YU.
 
-## Development
+### Development
 
 ```sh
 pnpm install
