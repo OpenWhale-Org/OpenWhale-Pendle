@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { BaseExecutor, createLogger } from '@openwhaleorg/core'
 import type { ExecutionInstruction, ExecutionResult, ExecutorCredentialSlot } from '@openwhaleorg/core'
-import type { BorosSession, BorosSide, BorosBatchResult } from '@jarei/openwhale-pendle'
+import type { BorosSession, BorosSide, BorosBatchResult } from '@openwhaleorg/pendle'
 
 /**
  * pendle-strategy/maker — the write half of the maker-reward loop over one

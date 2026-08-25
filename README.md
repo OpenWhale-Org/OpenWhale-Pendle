@@ -2,7 +2,7 @@
 
 Boros maker-reward strategy for [OpenWhale](https://github.com/openwhaleorg/openwhale). One instance quotes one Boros market: it rests a post-only order at the far edge of each side's maker-incentive band, follows the band as the mid implied APR moves, and earns the campaign's hourly budget in proportion to its share of in-band liquidity.
 
-Depends on the `pendle` venue plugin (`@jarei/openwhale-pendle`) for the Boros agent credential, the `pendle/rates` account and the trading session.
+Depends on the `pendle` venue plugin (`@openwhaleorg/pendle`) for the Boros agent credential, the `pendle/rates` account and the trading session.
 
 [中文说明 →](./README.zh-CN.md)
 

@@ -2,7 +2,7 @@ import type { OpenWhalePlugin, PluginFactory } from '@openwhaleorg/core'
 import { MarketWatchMonitor, marketWatchParamsSchema } from './monitor/MarketWatchMonitor.js'
 import { MakerExecutor } from './executor/MakerExecutor.js'
 import { MakerStrategy } from './strategy/MakerStrategy.js'
-import { PENDLE_LOGO } from '@jarei/openwhale-pendle'
+import { PENDLE_LOGO } from '@openwhaleorg/pendle'
 
 /**
  * pendle-strategy — OpenWhale Pendle Strategy: Pendle / Boros strategies (maker rewards first). Depends on the

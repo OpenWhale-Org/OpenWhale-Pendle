@@ -1,4 +1,4 @@
-import type { BorosSide } from '@jarei/openwhale-pendle'
+import type { BorosSide } from '@openwhaleorg/pendle'
 
 /**
  * The corridor rule (design S1–S3, 2026-08-24): a maker-reward order rests at

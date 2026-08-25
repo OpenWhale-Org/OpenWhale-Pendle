@@ -2,7 +2,7 @@
 
 OpenWhale 的 Boros 挂单奖励策略。一个实例只做一个 Boros 市场：在每一侧激励带的最远边缘挂一张 post-only 单，随中间隐含 APR 的移动跟着带走，按自己在带内流动性中的份额领取该侧的每小时预算。
 
-依赖 `pendle` 场地插件（`@jarei/openwhale-pendle`）：Boros Agent 凭证、`pendle/rates` 账户、交易会话。
+依赖 `pendle` 场地插件（`@openwhaleorg/pendle`）：Boros Agent 凭证、`pendle/rates` 账户、交易会话。
 
 ## 工作原理
 

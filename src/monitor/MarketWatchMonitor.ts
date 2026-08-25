@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { BaseMonitor, MonitorMode, createLogger } from '@openwhaleorg/core'
 import type { MonitorContext, AdapterResolver, MonitorPlotDef, MonitorRecord } from '@openwhaleorg/core'
-import type { BorosSession, BorosBookLevel } from '@jarei/openwhale-pendle'
+import type { BorosSession, BorosBookLevel } from '@openwhaleorg/pendle'
 
 /**
  * pendle-strategy/market-watch — one Boros market's maker picture, polled
