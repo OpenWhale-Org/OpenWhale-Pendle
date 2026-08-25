@@ -56,18 +56,37 @@ export interface BorosBook { long: BorosBookLevel[]; short: BorosBookLevel[]; bl
 
 export interface BorosOpenOrder {
   orderId: string
+  marketId: number
   side: BorosSide
   /** Implied APR the order rests at (decimal). */
   apr: number
   sizeYu: number
   unfilledYu: number
+  /** Cross-margin account (the strategy's) vs an isolated per-market account (manual UI trades). */
+  isCross: boolean
 }
 
 export interface BorosPosition {
   marketId: number
+  tokenId: number
+  isCross: boolean
   /** Long positive, short negative — YU. */
   signedSizeYu: number
-  positionValue: number
+  /** Entry fixed APR (decimal). */
+  fixedApr: number
+  unrealisedPnl: number
+  settlementPnl: number
+  cumulativePnl: number
+}
+
+/** One margin account (cross per token, or isolated per market) with its balances. */
+export interface BorosAccountInfo {
+  marketAcc: string
+  tokenId: number
+  /** undefined = cross account for the token. */
+  marketId?: number
+  netBalance: number
+  totalCash: number
 }
 
 const YU = 1e18
@@ -186,10 +205,79 @@ export class BorosSession {
     }
   }
 
-  // ── Account reads (credentialed) ───────────────────────────────────────────
+  // ── Account reads (credentialed; REST, no signing key needed) ──────────────
+
+  private requireRoot(): `0x${string}` {
+    if (!this.rootAddress) throw new Error('This Boros session is keyless — bind a pendle/boros-agent credential to read the account')
+    return this.rootAddress
+  }
+
+  private assetSymbols?: Map<number, string>
+  /** tokenId → collateral symbol, cached for the session. */
+  async assets(): Promise<Map<number, string>> {
+    if (this.assetSymbols) return this.assetSymbols
+    const res = (await this.api.assets.assetsControllerListAssets({})).data as unknown as { results?: Array<{ tokenId: number; symbol?: string; name?: string }> }
+    this.assetSymbols = new Map((res.results ?? []).map(a => [a.tokenId, a.symbol ?? a.name ?? String(a.tokenId)]))
+    return this.assetSymbols
+  }
 
   async gasBalance(): Promise<number> {
     return this.requireExchange().getGasBalance()
+  }
+
+  /** Every open position of the root account — cross and isolated alike. */
+  async activePositions(): Promise<BorosPosition[]> {
+    const root = this.requireRoot()
+    const res = (await this.api.accounts.accountsV2ControllerGetActivePositions({ root, accountId: this.accountId })).data as unknown as {
+      results?: Array<{ marketId: number; marketAcc: string; isCross: boolean; fixedApr: number; signedSize: string; cumulativePnl: string; unrealisedPnl?: string; settlementPnl?: string }>
+    }
+    return (res.results ?? []).map(p => ({
+      marketId: p.marketId,
+      tokenId: MarketAccLib.unpack(p.marketAcc as `0x${string}`).tokenId,
+      isCross: p.isCross,
+      signedSizeYu: toYu(p.signedSize),
+      fixedApr: p.fixedApr,
+      unrealisedPnl: toYu(p.unrealisedPnl ?? '0'),
+      settlementPnl: toYu(p.settlementPnl ?? '0'),
+      cumulativePnl: toYu(p.cumulativePnl),
+    }))
+  }
+
+  /** Open orders of the root account (all markets unless one is given) — cross and isolated alike. */
+  async openOrders(marketId?: number): Promise<BorosOpenOrder[]> {
+    const root = this.requireRoot()
+    const res = (await this.api.accounts.accountsV2ControllerGetOrders({
+      root, accountId: this.accountId, isActive: true, limit: 50, ...(marketId !== undefined ? { marketId } : {}),
+    })).data as unknown as {
+      results?: Array<{ orderId: string; marketId: number; side: 0 | 1; impliedApr: number; placedSize: string; unfilledSize: string; isCross: boolean }>
+    }
+    return (res.results ?? []).map(o => ({
+      orderId: o.orderId,
+      marketId: o.marketId,
+      side: o.side === 0 ? 'long' : 'short',
+      apr: o.impliedApr,
+      sizeYu: toYu(o.placedSize),
+      unfilledYu: toYu(o.unfilledSize),
+      isCross: o.isCross,
+    }))
+  }
+
+  /** Margin accounts with balances — netBalance is the venue's own equity figure per account. */
+  async accountInfos(): Promise<BorosAccountInfo[]> {
+    const root = this.requireRoot()
+    const res = (await this.api.accounts.accountsV2ControllerGetMarketAccInfosByRoot({ root })).data as unknown as {
+      results?: Array<{ marketAcc: string; totalCash: string; netBalance: string }>
+    }
+    return (res.results ?? []).map(a => {
+      const { tokenId, marketId } = MarketAccLib.unpack(a.marketAcc as `0x${string}`)
+      return {
+        marketAcc: a.marketAcc,
+        tokenId,
+        ...(marketId !== CROSS_MARKET_ID ? { marketId } : {}),
+        netBalance: toYu(a.netBalance),
+        totalCash: toYu(a.totalCash),
+      }
+    })
   }
 
   async positions(marketId: number, tokenId: number): Promise<unknown> {
@@ -221,22 +309,34 @@ export class BorosSession {
     await this.requireExchange().enterMarkets(true, [marketId])
   }
 
-  async openOrders(marketId: number, tokenId: number): Promise<BorosOpenOrder[]> {
+  /**
+   * The strategy's resting orders on a market: CROSS account only, straight
+   * from the contract. Isolated orders belong to whoever placed them by hand
+   * on the venue UI and are never touched by automation.
+   */
+  async restingOrders(marketId: number, tokenId: number): Promise<BorosOpenOrder[]> {
+    const cross = this.marketAcc(tokenId).toLowerCase()
     const { results } = await this.requireExchange().getActiveOrdersFromContract({ marketId, tokenId })
-    return results.map(o => ({
-      orderId: o.orderId.toString(),
-      side: o.side === Side.LONG ? 'long' : 'short',
-      apr: o.impliedApr,
-      sizeYu: toYu(o.size),
-      unfilledYu: toYu(o.unfilledSize),
-    }))
+    return results
+      .filter(o => o.marketAcc.toLowerCase() === cross)
+      .map(o => ({
+        orderId: o.orderId.toString(),
+        marketId,
+        side: o.side === Side.LONG ? 'long' : 'short',
+        apr: o.impliedApr,
+        sizeYu: toYu(o.size),
+        unfilledYu: toYu(o.unfilledSize),
+        isCross: true,
+      }))
   }
 
-  async position(marketId: number, tokenId: number): Promise<BorosPosition | undefined> {
+  /** The strategy's position on a market — CROSS account only (see restingOrders). */
+  async crossPosition(marketId: number, tokenId: number): Promise<{ signedSizeYu: number; positionValue: number } | undefined> {
+    const cross = this.marketAcc(tokenId).toLowerCase()
     const positions = await this.requireExchange().getUserPositions({ marketId, tokenId })
-    const p = positions.find(x => x.marketId === marketId)
+    const p = positions.find(x => x.marketId === marketId && x.marketAcc.toLowerCase() === cross)
     if (!p) return undefined
-    return { marketId, signedSizeYu: toYu(p.signedSize), positionValue: toYu(p.positionValue) }
+    return { signedSizeYu: toYu(p.signedSize), positionValue: toYu(p.positionValue) }
   }
 
   // ── Writes (agent-signed, relayed) ─────────────────────────────────────────
