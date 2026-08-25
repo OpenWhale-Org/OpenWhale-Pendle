@@ -61,6 +61,8 @@ export interface BorosBook { long: BorosBookLevel[]; short: BorosBookLevel[]; bl
 export interface BorosOpenOrder {
   orderId: string
   marketId: number
+  /** Epoch ms, when the indexer knows it. */
+  placedAt?: number
   side: BorosSide
   /** Implied APR the order rests at (decimal). */
   apr: number
@@ -289,11 +291,12 @@ export class BorosSession {
     const res = (await this.api.accounts.accountsV2ControllerGetOrders({
       root, accountId: this.accountId, isActive: true, limit: 50, ...(marketId !== undefined ? { marketId } : {}),
     })).data as unknown as {
-      results?: Array<{ orderId: string; marketId: number; side: 0 | 1; impliedApr: number; placedSize: string; unfilledSize: string; isCross: boolean }>
+      results?: Array<{ orderId: string; marketId: number; side: 0 | 1; impliedApr: number; placedSize: string; unfilledSize: string; isCross: boolean; placedTimestamp?: number }>
     }
     return (res.results ?? []).map(o => ({
       orderId: o.orderId,
       marketId: o.marketId,
+      ...(o.placedTimestamp !== undefined ? { placedAt: o.placedTimestamp * 1000 } : {}),
       side: o.side === 0 ? 'long' : 'short',
       apr: o.impliedApr,
       sizeYu: toYu(o.placedSize),

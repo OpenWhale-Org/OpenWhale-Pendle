@@ -77,7 +77,21 @@ export class PendleMarketSession {
  * stack shares; the API values every PT/YT/LP position in USD, so equity is
  * real (unlike the raw-chain wallet view, which can only price stables).
  */
-@OwAccount({ id: 'market-account', kind: 'pendle/market', venue: 'pendle', displayName: 'Pendle Account' })
+@OwAccount({
+  id: 'market-account', kind: 'pendle/market', venue: 'pendle', displayName: 'Pendle Account',
+  sections: [
+    {
+      method: 'holdings', title: 'Holdings', kind: 'table', count: true, default: true, empty: 'No PT/YT/LP positions.',
+      columns: [
+        { key: 'kind', label: 'Token', format: 'badge' },
+        { key: 'marketId', label: 'Market', format: 'mono', grow: true },
+        { key: 'chainId', label: 'Chain', format: 'number', digits: 0 },
+        { key: 'balance', label: 'Balance', format: 'mono', align: 'right' },
+        { key: 'usd', label: 'Value', format: 'usd', align: 'right' },
+      ],
+    },
+  ],
+})
 export class PendleMarketAccount {
   static readonly kind = 'pendle/market' as const
   static readonly venueType = 'pendle'
@@ -98,6 +112,12 @@ export class PendleMarketAccount {
     }))
     const total = tokens.reduce((acc, t) => acc + t.usdValue, 0)
     return { usd: { available: total, total }, tokens }
+  }
+
+  /** Rows for the declared Holdings section. */
+  async holdings(): Promise<Array<{ kind: string; marketId: string; chainId: number; balance: string; usd: number }>> {
+    const positions = await this.session.positions()
+    return positions.map(p => ({ kind: p.kind.toUpperCase(), marketId: p.marketId, chainId: p.chainId, balance: p.balance, usd: p.usd }))
   }
 
   async snapshot(): Promise<{ equity: number }> {
