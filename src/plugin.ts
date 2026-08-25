@@ -2,6 +2,7 @@ import type { OpenWhalePlugin, PluginFactory } from '@openwhaleorg/core'
 import { MarketWatchMonitor, marketWatchParamsSchema } from './monitor/MarketWatchMonitor.js'
 import { MakerExecutor } from './executor/MakerExecutor.js'
 import { MakerStrategy } from './strategy/MakerStrategy.js'
+import { PENDLE_LOGO } from '@jarei/openwhale-pendle'
 
 /**
  * pendle-maker — the Boros maker-reward strategy package. Depends on the
@@ -13,7 +14,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
   return {
     name: 'pendle-maker',
     version: '0.1.0',
-    icon: '🎯',
+    logo: PENDLE_LOGO,
     readme: [
       '# pendle-maker',
       '',
@@ -26,7 +27,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
       '- Create one strategy instance per market. It starts in **dry run** — it logs every cancel/place it would send. Switch dryRun off to go live.',
       '',
       '## Risk posture',
-      '- Both sides rest at `edgeRatio × range` from mid; re-quoted only when out of band or closer than `safeDistanceRatio × range`.',
+      '- Both sides rest at `edgeRatio × range` from mid; re-quoted only when out of band or closer than `safeDistanceRatio × range`. The cancels and places of one tick travel in one relayed transaction (~$0.01–0.02 of Arbitrum gas).',
       '- A fill is an accident: the deviation from the baseline is flattened with an IOC immediately, then quoting resumes.',
       '- Quoting pauses below the gas floor. Deposits are never automated.',
       '',
@@ -50,10 +51,10 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
         definition: {
           id: 'maker',
           name: 'Boros Maker Executor',
-          description: 'Idempotent quote / cancel / flatten over one Boros account: quote re-reads resting orders on the side, cancels them, places one post-only order; flatten IOCs the opposite side after an accidental fill. simulate* variants log without sending.',
+          description: 'Idempotent requote / quote / cancel / flatten over one Boros account. requote cancels and re-rests any number of sides in ONE relayed transaction; flatten IOCs the deviation after an accidental fill. simulate* variants log without sending.',
           source: 'plugin',
           pluginName: 'pendle-maker',
-          supportedActions: ['quote', 'cancel', 'flatten', 'simulateQuote', 'simulateCancel', 'simulateFlatten'],
+          supportedActions: ['requote', 'quote', 'cancel', 'flatten', 'simulateRequote', 'simulateQuote', 'simulateCancel', 'simulateFlatten'],
           createdAt: now,
           updatedAt: now,
         },
@@ -65,7 +66,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
         definition: {
           id: 'boros-maker',
           name: 'Boros Maker Rewards',
-          description: '在 Boros 激励带最远边缘双边挂 post-only 单、实时跟随带移动吃 maker 奖励；被吃即刻平回中性；一实例一市场；默认模拟运行。',
+          description: 'Rests post-only orders at the far edge of the Boros maker-incentive band on both sides and follows the band as mid moves; an accidental fill is flattened at once; one instance per market; starts in dry run.',
           source: 'plugin',
           pluginName: 'pendle-maker',
           accountRequirements: [{ label: 'boros', kind: 'pendle/rates' }],

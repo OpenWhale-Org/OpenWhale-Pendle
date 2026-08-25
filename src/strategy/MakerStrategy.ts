@@ -5,6 +5,7 @@ import { BorosRatesAccount } from '@jarei/openwhale-pendle'
 import type { BorosSide, BorosMarginMode } from '@jarei/openwhale-pendle'
 import type { MarketWatchSample } from '../monitor/MarketWatchMonitor.js'
 import { judgeSide } from './corridor.js'
+import { makerIllustrations } from './paramsIllustrations.js'
 
 const log = createLogger('BorosMaker')
 
@@ -70,6 +71,7 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   override readonly monitors = decls.monitors
   override readonly executors = decls.executors
   override readonly accounts = decls.accounts
+  readonly paramsIllustrations = makerIllustrations
 
   readonly baseParamsSchema = z.object({
     market: z.string().min(3).meta({
@@ -78,46 +80,46 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       catalogue: { source: 'market', kind: 'pendle/rates' },
     }),
     dryRun: z.boolean().default(true).meta({
-      displayName: '模拟运行 (Dry Run)',
+      displayName: 'Dry run',
       description: 'Follows the band and logs every cancel/place it would send, without sending. Switch off explicitly to go live.',
     }),
     marginMode: z.enum(['auto', 'cross', 'isolated']).default('auto').meta({
-      displayName: '保证金模式',
+      displayName: 'Margin mode',
       description: 'Which margin account the orders live in. auto = isolated when the venue marks the market isolated-only, else cross. The baseline snapshot and all reads/cancels are scoped to this account.',
     }),
     baselineSnapshot: z.boolean().default(true).meta({
-      displayName: '基线快照 (Baseline)',
+      displayName: 'Baseline snapshot',
       description: 'On every activation, record the position and resting orders the cross account already holds on this market and never touch them: only add orders on top, flatten only deviations. Best effort — the venue does not isolate the account, so a manual trade after activation looks like a fill. Recommended: run on a dedicated sub-account. Off = everything on the market is treated as the strategy\'s own.',
     }),
   })
 
   readonly tunableParamsSchema = z.object({
     sizeYu: z.number().positive().default(10).meta({
-      section: '规模', displayName: '每侧挂单量 (YU)',
+      section: 'Size', displayName: 'Order size per side (YU)',
       description: '1 YU = 1 unit of the market\'s collateral token of funding notional. Reward share = sizeYu / (pool + sizeYu) per side.',
     }),
     sides: z.enum(['both', 'long', 'short']).default('both').meta({
-      section: '规模', displayName: '挂单方向',
+      section: 'Size', displayName: 'Sides',
       description: 'both = double-sided (each side has its own budget and pool). Single-sided only if you have a view.',
     }),
     edgeRatio: z.number().min(0.5).max(1).default(0.95).meta({
-      section: '走廊', displayName: '挂单位置 (带宽比例)',
+      section: 'Corridor', displayName: 'Resting distance (× half-width)',
       description: 'Resting distance from mid as a fraction of the band half-width. 0.95 = just inside the far edge (rounding protection).',
     }),
     safeDistanceRatio: z.number().min(0.05).max(0.9).default(0.3).meta({
-      section: '走廊', displayName: '安全内线 (带宽比例)',
+      section: 'Corridor', displayName: 'Safe distance (× half-width)',
       description: 'Re-quote away when mid comes closer than this fraction of the half-width — fill risk rises fast near the touch.',
     }),
     requoteIntervalMs: z.number().int().min(5_000).default(30_000).meta({
-      section: '走廊', displayName: '最小挂单间隔 (ms)',
-      description: 'Per side, for placing AND re-quoting. Every emission is a relayed cancel + place, and the contract read lags the relay by a few seconds — shorter than ~15s risks stacking a duplicate order.',
+      section: 'Corridor', displayName: 'Min re-quote interval (ms)',
+      description: 'Per side, for placing AND re-quoting. Every emission is one relayed transaction (cancel + place), and the contract read lags the relay by a few seconds — shorter than ~15s risks stacking a duplicate order.',
     }),
     gasFloorUsd: z.number().min(0).default(3).meta({
-      section: '风控', displayName: 'Gas 余额地板 (USD)',
+      section: 'Risk', displayName: 'Gas balance floor (USD)',
       description: 'Relayed actions are paid from the account\'s on-chain USD gas balance. Below this, quoting pauses (a dry balance fails silently).',
     }),
     flattenSlippage: z.number().min(0).max(0.2).default(0.02).meta({
-      section: '风控', displayName: '平仓滑点 (APR 比例)',
+      section: 'Risk', displayName: 'Flatten slippage (× APR)',
       description: 'How far past the touch the flatten IOC may reach after an accidental fill.',
     }),
   })
@@ -229,7 +231,10 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     // ── Corridor per side (only OUR orders count — baseline ones are invisible here) ──
     const resting = (await account.restingOrders(marketId, tokenId, mode).catch(() => [])).filter(o => !protectOrderIds.includes(o.orderId))
     const sides: BorosSide[] = t.sides === 'both' ? ['long', 'short'] : [t.sides]
-    let dirty = false
+    // Everything this tick wants goes out as ONE requote instruction — the
+    // executor turns it into a single relayed transaction (one gas charge).
+    const orders: Array<{ side: BorosSide; sizeYu: number; apr: number }> = []
+    const cancelSides: BorosSide[] = []
     for (const side of sides) {
       const band = sample.band[side]
       if (band.range <= 0 || band.budgetPerHour <= 0) continue   // nothing to farm on this side right now
@@ -245,19 +250,19 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       // the next tick and would be placed twice (seen live: two 50-YU longs).
       if ((state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
       log.info({ marketId, side, action: verdict.action, apr: verdict.targetApr, reason: verdict.reason, mid: sample.midApr }, 'quoting')
-      out.push(this.instruction('maker', act('quote'), { marketId, tokenId, marginMode: mode, side, sizeYu: t.sizeYu, apr: verdict.targetApr, protectOrderIds }, ['boros']))
+      orders.push({ side, sizeYu: t.sizeYu, apr: verdict.targetApr })
       state[side] = { apr: verdict.targetApr, ts: now }
-      dirty = true
     }
     // Sides we no longer quote (config narrowed) get cleaned up once
     for (const side of (['long', 'short'] as BorosSide[]).filter(s => !sides.includes(s))) {
       if (state[side] || resting.some(o => o.side === side)) {
-        out.push(this.instruction('maker', act('cancel'), { marketId, tokenId, marginMode: mode, side, protectOrderIds }, ['boros']))
+        cancelSides.push(side)
         delete state[side]
-        dirty = true
       }
     }
-    if (dirty) await this.store.set(STATE_KEY, state)
+    if (orders.length === 0 && cancelSides.length === 0) return out
+    out.push(this.instruction('maker', act('requote'), { marketId, tokenId, marginMode: mode, orders, cancelSides, protectOrderIds }, ['boros']))
+    await this.store.set(STATE_KEY, state)
     return out
   }
 }
