@@ -107,8 +107,22 @@ export const scanIncentivesScript: ScriptDefinition = {
         jsonRows.push({ marketId: m.marketId, symbol: m.imData.symbol, daysToMaturity: Number(days), long, short })
       } catch { /* markets without campaigns are simply not listed */ }
     }
+    const guide = [
+      '',
+      '── How to read this ──────────────────────────────────────────────',
+      'One row per market with a LIVE maker budget. Reward accrues per SIDE:',
+      '  your reward/h (a side) = budget/h × yourSize / (pool + yourSize)',
+      '  band ±x%   = the incentive range around mid implied APR. Orders resting inside it earn; the edge earns the same as the touch (no distance weighting).',
+      '  L / S      = the long / short side: budget in PENDLE per hour, then the pool = YU already resting in band on that side (what you share the budget with).',
+      '  pool (YU)  = 1 YU ≈ 1 unit of the market\'s collateral (USDT/USDC for most; BTC/HYPE-margined markets are NOT comparable across rows).',
+      '  days       = to maturity. Short-dated bands are wide but the budget stops at expiry.',
+      '',
+      'Picking a market: prefer a SMALL pool with a real budget — e.g. 50 YU into a 10-YU pool takes ~83% of that side\'s budget; the same 50 YU into a 500k pool takes ~0.01%.',
+      'Watch the band too: a wide band (±2%+) means the far edge is far from mid — safer from fills; a tight band (±0.4%) puts you close to the touch.',
+      'Rows with pool 0.0 are free money until someone else shows up. Markets marked isolated-only (check the market page) need marginMode=isolated (auto handles it).',
+    ].join('\n')
     return {
-      text: rows.length ? `market  symbol / days-to-maturity / band / per-side budget+pool (YU)\n${rows.join('\n')}` : 'No live maker-incentive budgets right now.',
+      text: rows.length ? `market  symbol / days-to-maturity / band / per-side budget+pool (YU)\n${rows.join('\n')}${guide}` : 'No live maker-incentive budgets right now.',
       json: jsonRows,
     }
   },
