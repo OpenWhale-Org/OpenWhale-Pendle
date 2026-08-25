@@ -32,6 +32,8 @@ export const makerActionSchemas = {
     marketId: z.number().int(),
     tokenId: z.number().int(),
     side: sideSchema.optional().meta({ description: 'Absent = both sides' }),
+    /** Explicit ids to cancel (an operator cleaning up); absent = every non-protected order on the side(s). */
+    orderIds: z.array(z.string()).optional(),
     protectOrderIds: z.array(z.string()).default([]),
     marginMode: modeSchema,
   }),
@@ -121,7 +123,8 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
     const boros = this.boros()
     const protectedIds = new Set(p.protectOrderIds)
     const resting = (await boros.restingOrders(p.marketId, p.tokenId, p.marginMode)).filter(o => (p.side === undefined || o.side === p.side) && !protectedIds.has(o.orderId))
-    const ids = resting.map(o => o.orderId)
+    const wanted = p.orderIds ? new Set(p.orderIds) : undefined
+    const ids = resting.filter(o => !wanted || wanted.has(o.orderId)).map(o => o.orderId)
     if (simulate) {
       this.logger.info({ ...p, ids }, '[simulate] would cancel')
       return { simulated: true, cancelled: ids }

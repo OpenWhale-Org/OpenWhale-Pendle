@@ -178,14 +178,21 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
         account.crossPosition(marketId, tokenId, mode).catch(() => undefined),
         account.restingOrders(marketId, tokenId, mode).catch(() => []),
       ])
+      // Orders resting exactly where THIS instance last quoted are its own
+      // leftovers from before a restart, not the operator's — keep them out of
+      // the baseline so they get managed (re-quoted / cancelled) as usual.
+      const ownApr = (side: BorosSide) => state[side]?.apr
+      const isOurs = (o: { side: BorosSide; apr: number }) => {
+        const apr = ownApr(o.side)
+        return apr !== undefined && Math.abs(o.apr - apr) < 1e-6
+      }
+      const inherited = resting.filter(o => !isOurs(o))
       state.baseline = baselineSnapshot
-        ? { signedSizeYu: position?.signedSizeYu ?? 0, orderIds: resting.map(o => o.orderId), takenAt: now }
+        ? { signedSizeYu: position?.signedSizeYu ?? 0, orderIds: inherited.map(o => o.orderId), takenAt: now }
         : { signedSizeYu: 0, orderIds: [], takenAt: now }
-      delete state.long
-      delete state.short
       this.baselineTaken = true
       await this.store.set(STATE_KEY, state)
-      log.info({ market, mode, baseline: state.baseline, snapshot: baselineSnapshot }, 'baseline taken — untouchable from here on')
+      log.info({ market, mode, baseline: state.baseline, ownLeftovers: resting.length - inherited.length, snapshot: baselineSnapshot }, 'baseline taken — untouchable from here on')
     }
     const baseline = state.baseline ?? { signedSizeYu: 0, orderIds: [], takenAt: 0 }
     const protectOrderIds = baseline.orderIds
