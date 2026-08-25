@@ -27,8 +27,13 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
       '',
       '## Risk posture',
       '- Both sides rest at `edgeRatio × range` from mid; re-quoted only when out of band or closer than `safeDistanceRatio × range`.',
-      '- A fill is an accident: the position is flattened with an IOC immediately, then quoting resumes.',
+      '- A fill is an accident: the deviation from the baseline is flattened with an IOC immediately, then quoting resumes.',
       '- Quoting pauses below the gas floor. Deposits are never automated.',
+      '',
+      '## Baseline — and why a dedicated sub-account',
+      'At every activation the strategy snapshots what the **cross** account already holds on the market (position size + resting order ids) and treats it as untouchable: it only adds orders on top, never cancels baseline orders, and only flattens deviations from the baseline size. Isolated-margin positions and orders are never touched at all.',
+      '',
+      'This is best effort. The venue does not isolate the account, so a manual trade placed *after* activation is indistinguishable from an accidental fill and would be flattened. **Run the strategy on its own Boros sub-account** (the agent credential\'s `Sub-account Id`, e.g. 1) with its own collateral — then the baseline is trivially empty and nothing you do by hand can collide with it. The snapshot can be switched off (`baselineSnapshot`), which treats everything on the market as the strategy\'s own.',
     ].join('\n'),
     monitorImplementations: [
       {

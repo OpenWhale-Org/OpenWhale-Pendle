@@ -22,6 +22,15 @@ const log = createLogger('BorosMaker')
  * Deposits are manual (S5): if the venue rejects for margin, this logs and
  * waits. The account's USD gas balance funds every relayed action — below
  * the floor, quoting pauses rather than failing silently.
+ *
+ * Baseline: the account may already hold a position and resting orders when
+ * the instance starts. At every activation the strategy snapshots what the
+ * cross account holds on the market — position size and order ids — and
+ * treats it as untouchable: it only ADDS orders, never cancels baseline
+ * ones, and flattens only deviations from the baseline size. The venue does
+ * not isolate the account, so the baseline is best effort (a manual trade
+ * after activation looks like a fill) — run the strategy on its own
+ * sub-account when you can.
  */
 
 const decls = {
@@ -36,9 +45,17 @@ interface SideState {
   ts: number
 }
 
+interface Baseline {
+  signedSizeYu: number
+  orderIds: string[]
+  takenAt: number
+}
+
 interface MakerState {
   long?: SideState
   short?: SideState
+  /** What the cross account held at the last activation — never touched. */
+  baseline?: Baseline
   /** Last flatten emission — one accident, one flatten. */
   lastFlattenTs?: number
   /** Gas-floor pause announced (so the log isn't spammed every tick). */
@@ -63,6 +80,10 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     dryRun: z.boolean().default(true).meta({
       displayName: '模拟运行 (Dry Run)',
       description: 'Follows the band and logs every cancel/place it would send, without sending. Switch off explicitly to go live.',
+    }),
+    baselineSnapshot: z.boolean().default(true).meta({
+      displayName: '基线快照 (Baseline)',
+      description: 'On every activation, record the position and resting orders the cross account already holds on this market and never touch them: only add orders on top, flatten only deviations. Best effort — the venue does not isolate the account, so a manual trade after activation looks like a fill. Recommended: run on a dedicated sub-account. Off = everything on the market is treated as the strategy\'s own.',
     }),
   })
 
@@ -110,6 +131,8 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   }
 
   private evaluating = false
+  /** Process-memory: a fresh strategy object per activation → the baseline is re-taken each start. */
+  private baselineTaken = false
 
   async evaluate(context: StrategyContext): Promise<ExecutionInstruction[]> {
     if (this.evaluating) return []
@@ -122,7 +145,7 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   }
 
   private async evaluateInner(_context: StrategyContext): Promise<ExecutionInstruction[]> {
-    const { market, dryRun } = this.baseParamsSchema.parse(this.params.base)
+    const { market, dryRun, baselineSnapshot } = this.baseParamsSchema.parse(this.params.base)
     const t = this.tunableParamsSchema.parse(this.params.tunable)
     const act = (action: string) => (dryRun ? `simulate${action.charAt(0).toUpperCase()}${action.slice(1)}` : action)
 
@@ -140,12 +163,31 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     const out: ExecutionInstruction[] = []
     const now = Date.now()
 
-    // ── Accident check first: a fill means we hold rate risk we never wanted ──
-    const position = await account.position(marketId, tokenId).catch(() => undefined)
-    if (position && Math.abs(position.signedSizeYu) > 1e-9) {
+    // ── Baseline: what the account held when this activation began ──────────
+    if (!this.baselineTaken) {
+      const [position, resting] = await Promise.all([
+        account.crossPosition(marketId, tokenId).catch(() => undefined),
+        account.restingOrders(marketId, tokenId).catch(() => []),
+      ])
+      state.baseline = baselineSnapshot
+        ? { signedSizeYu: position?.signedSizeYu ?? 0, orderIds: resting.map(o => o.orderId), takenAt: now }
+        : { signedSizeYu: 0, orderIds: [], takenAt: now }
+      delete state.long
+      delete state.short
+      this.baselineTaken = true
+      await this.store.set(STATE_KEY, state)
+      log.info({ market, baseline: state.baseline, snapshot: baselineSnapshot }, 'baseline taken — untouchable from here on')
+    }
+    const baseline = state.baseline ?? { signedSizeYu: 0, orderIds: [], takenAt: 0 }
+    const protectOrderIds = baseline.orderIds
+
+    // ── Accident check: the cross position drifted from the baseline → one of OUR orders filled ──
+    const position = await account.crossPosition(marketId, tokenId).catch(() => undefined)
+    const delta = (position?.signedSizeYu ?? 0) - baseline.signedSizeYu
+    if (Math.abs(delta) > 1e-9) {
       if ((state.lastFlattenTs ?? 0) < now - 30_000) {
-        log.warn({ marketId, signedSizeYu: position.signedSizeYu }, 'accidental fill — flattening')
-        out.push(this.instruction('maker', act('flatten'), { marketId, tokenId, slippage: t.flattenSlippage }, ['boros']))
+        log.warn({ marketId, deltaYu: delta, baselineYu: baseline.signedSizeYu }, 'position deviates from baseline — flattening the deviation')
+        out.push(this.instruction('maker', act('flatten'), { marketId, tokenId, baselineSizeYu: baseline.signedSizeYu, protectOrderIds, slippage: t.flattenSlippage }, ['boros']))
         state.lastFlattenTs = now
         delete state.long
         delete state.short
@@ -166,8 +208,8 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     }
     if (state.gasPaused) { state.gasPaused = false; await this.store.set(STATE_KEY, state) }
 
-    // ── Corridor per side ───────────────────────────────────────────────────
-    const resting = await account.openOrders(marketId, tokenId).catch(() => [])
+    // ── Corridor per side (only OUR orders count — baseline ones are invisible here) ──
+    const resting = (await account.restingOrders(marketId, tokenId).catch(() => [])).filter(o => !protectOrderIds.includes(o.orderId))
     const sides: BorosSide[] = t.sides === 'both' ? ['long', 'short'] : [t.sides]
     let dirty = false
     for (const side of sides) {
@@ -179,14 +221,14 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       if (verdict.action === 'keep') continue
       if (verdict.action === 'requote' && (state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
       log.info({ marketId, side, action: verdict.action, apr: verdict.targetApr, reason: verdict.reason, mid: sample.midApr }, 'quoting')
-      out.push(this.instruction('maker', act('quote'), { marketId, tokenId, side, sizeYu: t.sizeYu, apr: verdict.targetApr }, ['boros']))
+      out.push(this.instruction('maker', act('quote'), { marketId, tokenId, side, sizeYu: t.sizeYu, apr: verdict.targetApr, protectOrderIds }, ['boros']))
       state[side] = { apr: verdict.targetApr, ts: now }
       dirty = true
     }
     // Sides we no longer quote (config narrowed) get cleaned up once
     for (const side of (['long', 'short'] as BorosSide[]).filter(s => !sides.includes(s))) {
       if (state[side] || resting.some(o => o.side === side)) {
-        out.push(this.instruction('maker', act('cancel'), { marketId, tokenId, side }, ['boros']))
+        out.push(this.instruction('maker', act('cancel'), { marketId, tokenId, side, protectOrderIds }, ['boros']))
         delete state[side]
         dirty = true
       }
