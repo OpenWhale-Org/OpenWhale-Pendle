@@ -26,6 +26,7 @@ const orderSchema = z.object({
   side: sideSchema,
   sizeYu: z.number().positive().meta({ description: 'Order size in YU (collateral units of notional)' }),
   apr: z.number().meta({ description: 'Resting implied APR, decimal (0.068 = 6.8%)' }),
+  keepInside: z.number().optional().meta({ description: 'Band edge the RESTING rate must stay inside of after tick rounding (long: ≥, short: ≤); the executor nudges the request inward until the venue agrees' }),
 })
 
 export const makerActionSchemas = {
@@ -141,11 +142,38 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
     }
     if (cancelIds.length === 0 && p.orders.length === 0) return { cancelled: [], placed: [] }
     if (p.orders.length > 0) await boros.ensureEntered(p.marketId, p.tokenId, p.marginMode)
-    const result: BorosBatchResult = await boros.batchRequote({ marketId: p.marketId, tokenId: p.tokenId, mode: p.marginMode, cancelIds, orders: p.orders as Array<{ side: BorosSide; sizeYu: number; apr: number }> })
+    const orders = await Promise.all(p.orders.map(o => this.snapInside(boros, p.marketId, o)))
+    const result: BorosBatchResult = await boros.batchRequote({ marketId: p.marketId, tokenId: p.tokenId, mode: p.marginMode, cancelIds, orders })
     if (result.errors.length > 0 && result.placed.length === 0 && result.cancelled.length === 0) throw new Error(result.errors.join('; '))
     if (result.errors.length > 0) this.logger.warn({ marketId: p.marketId, errors: result.errors }, 'batch landed with per-call errors')
-    this.logger.info({ marketId: p.marketId, orders: p.orders, cancelled: result.cancelled.length, placed: result.placed.length, txHash: result.txHash }, 'maker orders re-quoted in one transaction')
-    return { ...result, requested: p.orders }
+    this.logger.info({ marketId: p.marketId, orders, cancelled: result.cancelled.length, placed: result.placed.length, txHash: result.txHash }, 'maker orders re-quoted in one transaction')
+    return { ...result, requested: orders }
+  }
+
+  /**
+   * The venue rounds a requested rate to its tick grid, and a target set just
+   * inside the band edge can round to just OUTSIDE it — an order that earns
+   * nothing and that the strategy re-quotes to the same tick forever (seen
+   * live: 4.90% resting against a 4.91% edge, cancelled and replaced every
+   * tick). Ask the venue where the order would land and step the request
+   * inward, one gap at a time, until it lands inside.
+   */
+  private async snapInside(boros: BorosSession, marketId: number, o: z.infer<typeof orderSchema>): Promise<{ side: BorosSide; sizeYu: number; apr: number }> {
+    const side = o.side as BorosSide
+    if (o.keepInside === undefined) return { side, sizeYu: o.sizeYu, apr: o.apr }
+    const inside = (rate: number) => (side === 'long' ? rate >= o.keepInside! : rate <= o.keepInside!)
+    let apr = o.apr
+    for (let i = 0; i < 6; i++) {
+      let actual: number
+      try { actual = await boros.resolveRate({ marketId, side, sizeYu: o.sizeYu, apr }) } catch { break }
+      if (inside(actual)) {
+        if (apr !== o.apr) this.logger.info({ marketId, side, requested: o.apr, adjusted: apr, resting: actual, edge: o.keepInside }, 'target snapped inward to stay in band')
+        return { side, sizeYu: o.sizeYu, apr }
+      }
+      const gap = Math.abs(o.keepInside! - actual) + 0.0001
+      apr = side === 'long' ? apr + gap : apr - gap
+    }
+    return { side, sizeYu: o.sizeYu, apr }
   }
 
   private async cancel(p: z.infer<typeof makerActionSchemas.cancel>, simulate: boolean): Promise<Record<string, unknown>> {

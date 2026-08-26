@@ -515,6 +515,20 @@ export class BorosSession {
     return out
   }
 
+  /**
+   * The APR an order at `apr` would actually rest at once the venue snaps it
+   * to its tick grid — read from the anonymous order simulation. Ticks are
+   * coarse (0.01–0.02% APR on most markets), so a target computed from the
+   * band edge can land one tick outside the band; callers snap inward.
+   */
+  async resolveRate(args: { marketId: number; side: BorosSide; sizeYu: number; apr: number }): Promise<number> {
+    const sim = (await this.api.simulations.simulationsControllerSimulatePlaceOrderAnonymous({
+      marketId: args.marketId, side: args.side === 'long' ? 0 : 1, size: fromYu(args.sizeYu).toString(), rate: args.apr, tif: 3,
+    })).data as { resolved?: { actualRate?: number } }
+    const actual = sim.resolved?.actualRate
+    return typeof actual === 'number' ? actual : args.apr
+  }
+
   async close(): Promise<void> {
     // REST + http transports: nothing persistent to release
   }

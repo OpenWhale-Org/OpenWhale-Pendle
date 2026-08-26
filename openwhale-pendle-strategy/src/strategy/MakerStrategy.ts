@@ -250,7 +250,8 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       // the next tick and would be placed twice (seen live: two 50-YU longs).
       if ((state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
       log.info({ marketId, side, action: verdict.action, apr: verdict.targetApr, reason: verdict.reason, mid: sample.midApr }, 'quoting')
-      orders.push({ side, sizeYu: t.sizeYu, apr: verdict.targetApr })
+      // The band edge itself rides along: the executor makes sure the venue's tick rounding keeps the order inside it
+      orders.push({ side, sizeYu: t.sizeYu, apr: verdict.targetApr, keepInside: side === 'long' ? sample.midApr - band.range : sample.midApr + band.range })
       state[side] = { apr: verdict.targetApr, ts: now }
     }
     // Sides we no longer quote (config narrowed) get cleaned up once
