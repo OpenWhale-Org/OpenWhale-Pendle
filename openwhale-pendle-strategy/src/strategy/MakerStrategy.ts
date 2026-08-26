@@ -233,7 +233,7 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     const sides: BorosSide[] = t.sides === 'both' ? ['long', 'short'] : [t.sides]
     // Everything this tick wants goes out as ONE requote instruction — the
     // executor turns it into a single relayed transaction (one gas charge).
-    const orders: Array<{ side: BorosSide; sizeYu: number; apr: number }> = []
+    const orders: Array<{ side: BorosSide; sizeYu: number; apr: number; keepInside: number }> = []
     const cancelSides: BorosSide[] = []
     for (const side of sides) {
       const band = sample.band[side]
