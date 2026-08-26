@@ -535,6 +535,34 @@ export class BorosSession {
   }
 
   /**
+   * What closing this position by crossing would actually cost.
+   *
+   * Not the spread: the spread is what the FIRST YU pays, and a close walks
+   * the book. The venue simulates the whole order and answers with the average
+   * rate it would really get, so this is the number that predicts the cost
+   * rather than an optimistic proxy for it.
+   *
+   * Measured against the touch, deliberately — not against what the position
+   * was opened at. The entry is sunk; it has no bearing on whether crossing
+   * NOW is expensive, and deciding from it produces the exact wrong reflex:
+   * the further underwater, the more reluctant to close.
+   */
+  async closeCost(args: { marketId: number; side: BorosSide; sizeYu: number }): Promise<{ touch: number; actualRate: number; slippage: number }> {
+    const quote = await this.marketQuote(args.marketId)
+    // Closing a long means selling: the bid is what we reach for.
+    const touch = (args.side === 'short' ? quote.bestBid : quote.bestAsk) ?? quote.midApr
+    // No limit of our own — ask what an unconstrained cross would fetch
+    const sim = (await this.api.simulations.simulationsControllerSimulatePlaceOrderAnonymous({
+      marketId: args.marketId, side: args.side === 'long' ? 0 : 1, size: fromYu(args.sizeYu).toString(), rate: touch, tif: 1,
+    })).data as { resolved?: { actualRate?: number } }
+    const actualRate = sim.resolved?.actualRate
+    if (typeof actualRate !== 'number' || !(touch > 0)) {
+      throw new Error(`market ${args.marketId}: the venue would not price a ${args.sizeYu} YU close`)
+    }
+    return { touch, actualRate, slippage: Math.abs(actualRate - touch) / touch }
+  }
+
+  /**
    * Margin the venue asks per YU to rest at this rate.
    *
    * One anonymous simulation answers for every size: the requirement is

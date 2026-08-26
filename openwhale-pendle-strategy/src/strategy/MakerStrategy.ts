@@ -5,6 +5,7 @@ import { BorosRatesAccount } from '@openwhaleorg/pendle'
 import type { BorosSide, BorosMarginMode } from '@openwhaleorg/pendle'
 import type { MarketWatchSample } from '../monitor/MarketWatchMonitor.js'
 import { judgeSide } from './corridor.js'
+import { decideFill } from './fill.js'
 import { makerIllustrations } from './paramsIllustrations.js'
 
 const log = createLogger('BorosMaker')
@@ -59,9 +60,24 @@ interface MarginProbe {
   ts: number
 }
 
+/** An accidental fill being worked out of, from the tick it was noticed. */
+interface FillState {
+  /** When the deviation first appeared — the force-close clock runs from here. */
+  since: number
+  /** Mid at that moment. The synthetic stop measures the move against us from this. */
+  entryApr: number
+  /** Deviation at detection — a ladder slices this, not the shrinking remainder. */
+  sizeAtDetect: number
+  lastSliceTs?: number
+  /** `hold` announced, so the log is not repeated every tick. */
+  announced?: boolean
+}
+
 interface MakerState {
   long?: SideState
   short?: SideState
+  /** Set while a position is outstanding; cleared when it is flat again. */
+  fill?: FillState
   /** Per side, percent mode only — refreshed no faster than a re-quote could act on it. */
   probe?: Partial<Record<BorosSide, MarginProbe>>
   /** What the cross account held at the last activation — never touched. */
@@ -141,7 +157,31 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     }),
     flattenSlippage: z.number().min(0).max(0.2).default(0.02).meta({
       section: 'Risk', displayName: 'Flatten slippage (× APR)',
-      description: 'How far past the touch the flatten IOC may reach after an accidental fill.',
+      description: 'The limit on the closing IOC itself — how far past the touch it may reach before giving up. Not the decision of whether to cross; that is the Fill section.',
+    }),
+    fillSlippage: z.number().min(0).max(0.5).default(0.005).meta({
+      section: 'Fill', displayName: 'Acceptable close slippage',
+      description: 'Cross straight away when the venue simulates the close landing within this far of the touch. Measured on the WHOLE size against the book, so it is the real cost, not the spread. 0 = always cross, whatever it costs.',
+    }),
+    fillPolicy: z.enum(['limit', 'partial', 'ladder', 'hold']).default('limit').meta({
+      section: 'Fill', displayName: 'When the close is too expensive',
+      description: 'limit = rest a post-only close at the touch and wait. partial = cross only the part the book absorbs within budget, rest the remainder. ladder = cross a slice per interval, rest the remainder between slices. hold = keep the position untouched.',
+    }),
+    fillTimeoutMs: z.number().int().min(0).default(600_000).meta({
+      section: 'Fill', displayName: 'Force-close after (ms)',
+      description: 'Once the position has been outstanding this long, cross regardless of cost. Waiting for a better price has no natural end, and an open position on a strategy that wants none is a risk that grows with time. 0 = never force.',
+    }),
+    fillStopDistance: z.number().min(0).max(1).default(0.15).meta({
+      section: 'Fill', displayName: 'Synthetic stop (× entry APR)',
+      description: 'Cross regardless of cost once mid has moved this far against the position. SYNTHETIC: Boros has no stop orders, so the strategy watches and fires the IOC itself — it protects only while the engine is running, and reacts no faster than one tick. 0 = off.',
+    }),
+    fillSlices: z.number().int().min(2).max(20).default(4).meta({
+      section: 'Fill', displayName: 'Ladder slices',
+      description: 'Ladder policy only. Each slice is its own relayed transaction with its own gas — split further than the spread you are saving and the ladder costs more than crossing once.',
+    }),
+    fillSliceIntervalMs: z.number().int().min(5_000).default(60_000).meta({
+      section: 'Fill', displayName: 'Ladder interval (ms)',
+      description: 'Ladder policy only. How long between slices.',
     }),
   })
 
@@ -155,6 +195,33 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   override subscriptions(params: StrategyParams): MonitorSource[] {
     const { market } = this.baseParamsSchema.parse(params.base)
     return [{ monitorName: this.monitor('watch'), key: market }]
+  }
+
+  /**
+   * The largest slice that still crosses within budget.
+   *
+   * Bisection because the answer is not a formula: it depends on the resting
+   * depth, which only the venue knows and only answers one size at a time. Six
+   * probes land within ~1.5% of the true edge, and each is a network call, so
+   * the count is the accuracy actually worth paying for.
+   */
+  private async affordableSize(
+    account: { closeCost(a: { marketId: number; side: BorosSide; sizeYu: number }): Promise<{ slippage: number }> },
+    marketId: number,
+    side: BorosSide,
+    full: number,
+    budget: number,
+  ): Promise<number> {
+    let fits = 0
+    let over = full
+    for (let i = 0; i < 6 && over - fits > full * 0.02; i++) {
+      const probe = (fits + over) / 2
+      if (!(probe > 0)) break
+      const cost = await account.closeCost({ marketId, side, sizeYu: probe }).catch(() => undefined)
+      if (cost !== undefined && cost.slippage <= budget) fits = probe
+      else over = probe
+    }
+    return fits
   }
 
   private evaluating = false
@@ -230,19 +297,81 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     const baseline = state.baseline ?? { signedSizeYu: 0, orderIds: [], takenAt: 0 }
     const protectOrderIds = baseline.orderIds
 
-    // ── Accident check: the cross position drifted from the baseline → one of OUR orders filled ──
+    /* ── Accident check ─────────────────────────────────────────────────────
+       A position that differs from the baseline means one of OUR orders
+       filled. From here until it is flat again the strategy quotes nothing:
+       the band edge is where fills come from, and adding more of them while
+       already holding inventory is how a bad tick becomes a position.
+
+       Getting flat is a choice between two costs. Crossing pays the spread
+       and whatever depth the book lacks; resting pays nothing but has no
+       deadline and leaves the rate free to move against us. So the venue is
+       asked what crossing would ACTUALLY cost — the whole size simulated
+       against the book, not the spread — and that answer, against a budget,
+       decides. Above the budget the configured policy takes over, and two
+       overrides sit above the policy: a clock, and a move against us. */
     const position = await account.crossPosition(marketId, tokenId, mode).catch(() => undefined)
     const delta = (position?.signedSizeYu ?? 0) - baseline.signedSizeYu
     if (Math.abs(delta) > 1e-9) {
-      if ((state.lastFlattenTs ?? 0) < now - 30_000) {
-        log.warn({ marketId, deltaYu: delta, baselineYu: baseline.signedSizeYu }, 'position deviates from baseline — flattening the deviation')
-        out.push(this.instruction('maker', act('flatten'), { marketId, tokenId, marginMode: mode, baselineSizeYu: baseline.signedSizeYu, protectOrderIds, slippage: t.flattenSlippage }, ['boros']))
-        state.lastFlattenTs = now
-        delete state.long
-        delete state.short
-        await this.store.set(STATE_KEY, state)
+      const closeSide: BorosSide = delta > 0 ? 'short' : 'long'
+      const outstanding = Math.abs(delta)
+      if (!state.fill) {
+        state.fill = { since: now, entryApr: sample.midApr, sizeAtDetect: outstanding }
+        log.warn({ marketId, deltaYu: delta, baselineYu: baseline.signedSizeYu, midApr: sample.midApr }, 'an order filled — quoting is paused until the position is flat')
       }
+      const fill = state.fill
+      delete state.long
+      delete state.short
+
+      // Every branch below is one relayed transaction; the interval that
+      // paces re-quoting paces these too.
+      if ((state.lastFlattenTs ?? 0) > now - t.requoteIntervalMs) {
+        await this.store.set(STATE_KEY, state)
+        return out
+      }
+      const base = { marketId, tokenId, marginMode: mode, baselineSizeYu: baseline.signedSizeYu, protectOrderIds }
+      const emit = (params: Record<string, unknown>) => {
+        out.push(this.instruction('maker', act('flatten'), { ...base, ...params }, ['boros']))
+        state.lastFlattenTs = now
+      }
+
+      const cost = await account.closeCost({ marketId, side: closeSide, sizeYu: outstanding }).catch((err: unknown) => {
+        log.warn({ marketId, err }, 'the venue would not price the close — leaving the position for the next tick')
+        return undefined
+      })
+      const decision = await decideFill(
+        {
+          outstanding, closeSide, midApr: sample.midApr, now,
+          since: fill.since, entryApr: fill.entryApr, sizeAtDetect: fill.sizeAtDetect,
+          ...(fill.lastSliceTs !== undefined ? { lastSliceTs: fill.lastSliceTs } : {}),
+          ...(cost !== undefined ? { slippage: cost.slippage } : {}),
+        },
+        t,
+        () => this.affordableSize(account, marketId, closeSide, outstanding, t.fillSlippage),
+      )
+      log.info({ marketId, outstanding, ...(cost ?? {}), decision: decision.action, reason: decision.reason }, 'fill handling')
+
+      if (decision.action === 'cancel-only') {
+        // The rule holds even when we are not closing: nothing of ours rests
+        // at the edge while a position is open.
+        if (!fill.announced) {
+          fill.announced = true
+          out.push(this.instruction('maker', act('cancel'), { marketId, tokenId, marginMode: mode, protectOrderIds }, ['boros']))
+          state.lastFlattenTs = now
+        }
+      } else if (decision.action === 'rest') {
+        emit({ how: 'limit' })
+      } else {
+        emit({ how: 'ioc', slippage: t.flattenSlippage, ...(decision.maxSizeYu !== undefined ? { maxSizeYu: decision.maxSizeYu } : {}) })
+        if (decision.sliced) fill.lastSliceTs = now
+      }
+      await this.store.set(STATE_KEY, state)
       return out
+    }
+    if (state.fill) {
+      log.info({ marketId, heldMs: now - state.fill.since }, 'position is flat again — resuming quoting')
+      delete state.fill
+      await this.store.set(STATE_KEY, state)
     }
 
     // ── Fuel gauge: relayed actions die silently on an empty gas balance ────

@@ -218,6 +218,11 @@ export class BorosRatesAccount {
     return this.session.gasBalance()
   }
 
+  /** What crossing to close this size would average, and how far past the touch that is. */
+  closeCost(args: { marketId: number; side: BorosSide; sizeYu: number }): Promise<{ touch: number; actualRate: number; slippage: number }> {
+    return this.session.closeCost(args)
+  }
+
   /** Margin the venue asks per YU to rest at this rate (linear in size). */
   marginPerYu(args: { marketId: number; side: BorosSide; apr: number }): Promise<number> {
     return this.session.marginPerYu(args)

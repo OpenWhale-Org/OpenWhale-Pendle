@@ -64,6 +64,18 @@ export const makerActionSchemas = {
     baselineSizeYu: z.number().default(0),
     protectOrderIds: z.array(z.string()).default([]),
     slippage: z.number().min(0).max(0.5).default(0.02).meta({ description: 'How far past the touch the IOC order may reach, as a fraction of APR' }),
+    /**
+     * 'ioc' crosses now and pays for certainty. 'limit' rests a post-only
+     * order at the touch and waits, which costs nothing but may never fill —
+     * the caller is the one holding a timeout over it.
+     */
+    how: z.enum(['ioc', 'limit']).default('ioc'),
+    /**
+     * Close at most this much, leaving the rest outstanding. What a slice of a
+     * ladder is, and what "cross only the part the book absorbs cheaply"
+     * needs. Absent = the whole deviation.
+     */
+    maxSizeYu: z.number().positive().optional(),
   }),
 }
 
@@ -204,16 +216,42 @@ export class MakerExecutor extends BaseExecutor<MakerInstruction> {
     const quote = await boros.marketQuote(p.marketId)
     const side: BorosSide = delta > 0 ? 'short' : 'long'
     const touch = side === 'short' ? (quote.bestBid ?? quote.midApr) : (quote.bestAsk ?? quote.midApr)
-    const apr = side === 'short' ? touch * (1 - p.slippage) : touch * (1 + p.slippage)
+    // Re-read from the venue rather than trust the caller's number: a partial
+    // fill or an earlier slice may have landed since the decision was made,
+    // and closing a stale size is how a flatten overshoots into a position
+    // facing the other way.
+    const sizeYu = Math.min(Math.abs(delta), p.maxSizeYu ?? Infinity)
     const protectedIds = new Set(p.protectOrderIds)
-    const ours = (await boros.restingOrders(p.marketId, p.tokenId, p.marginMode)).filter(o => !protectedIds.has(o.orderId)).map(o => o.orderId)
+    const resting = (await boros.restingOrders(p.marketId, p.tokenId, p.marginMode)).filter(o => !protectedIds.has(o.orderId))
+
+    if (p.how === 'limit') {
+      /* A close order already resting on the right side for the right size is
+         work already done — replacing it surrenders queue position and pays a
+         relayed transaction for nothing. While a position is outstanding the
+         strategy places no edge orders, so anything of ours on the wrong side
+         or the wrong size is stale and goes. */
+      const wanted = resting.filter(o => o.side === side && Math.abs(o.unfilledYu - sizeYu) <= sizeYu * 0.02)
+      const stale = resting.filter(o => !wanted.includes(o)).map(o => o.orderId)
+      if (simulate) {
+        this.logger.info({ marketId: p.marketId, delta, side, apr: touch, sizeYu, cancel: stale, keep: wanted.length }, '[simulate] would rest a post-only close at the touch')
+        return { simulated: true, how: 'limit', deltaYu: delta, side, apr: touch, sizeYu, cancelled: stale, kept: wanted.length }
+      }
+      if (stale.length > 0) await boros.cancelOrders(p.marketId, p.tokenId, stale, p.marginMode)
+      if (wanted.length > 0) return { how: 'limit', deltaYu: delta, side, resting: wanted[0]!.orderId, sizeYu, unchanged: true }
+      await boros.placeMakerOrder({ marketId: p.marketId, tokenId: p.tokenId, side, sizeYu, apr: touch, mode: p.marginMode })
+      this.logger.warn({ marketId: p.marketId, delta, side, apr: touch, sizeYu }, 'resting a post-only close at the touch — waiting rather than paying the spread')
+      return { how: 'limit', deltaYu: delta, side, apr: touch, sizeYu, cancelled: stale }
+    }
+
+    const apr = side === 'short' ? touch * (1 - p.slippage) : touch * (1 + p.slippage)
+    const ours = resting.map(o => o.orderId)
     if (simulate) {
-      this.logger.info({ marketId: p.marketId, delta, side, apr, cancel: ours }, '[simulate] would cancel ours + IOC the deviation')
-      return { simulated: true, deltaYu: delta, side, apr, cancelled: ours }
+      this.logger.info({ marketId: p.marketId, delta, side, apr, sizeYu, cancel: ours }, '[simulate] would cancel ours + IOC the deviation')
+      return { simulated: true, how: 'ioc', deltaYu: delta, side, apr, sizeYu, cancelled: ours }
     }
     await boros.cancelOrders(p.marketId, p.tokenId, ours, p.marginMode)
-    const result = await boros.takerOrder({ marketId: p.marketId, tokenId: p.tokenId, side, sizeYu: Math.abs(delta), apr, mode: p.marginMode })
-    this.logger.warn({ marketId: p.marketId, delta, side, apr }, 'deviation from baseline flattened after an accidental fill')
-    return { deltaYu: delta, side, apr, cancelled: ours, result }
+    const result = await boros.takerOrder({ marketId: p.marketId, tokenId: p.tokenId, side, sizeYu, apr, mode: p.marginMode })
+    this.logger.warn({ marketId: p.marketId, delta, side, apr, sizeYu }, 'crossing to close the deviation after an accidental fill')
+    return { how: 'ioc', deltaYu: delta, side, apr, sizeYu, cancelled: ours, result }
   }
 }
