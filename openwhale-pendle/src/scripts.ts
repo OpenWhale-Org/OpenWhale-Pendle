@@ -126,7 +126,7 @@ export const scanIncentivesScript: ScriptDefinition = {
     marginUse: z.coerce.number().min(0.1).max(1).default(0.8).meta({ displayName: 'Margin use', description: 'Fraction of the capital committed as order margin; the rest stays as buffer against a fill and rate moves.' }),
     edgeRatio: z.coerce.number().min(0.5).max(1).default(0.95).meta({ displayName: 'Edge ratio', description: 'Where the order rests as a fraction of the band half-width — mirror the strategy\'s value.' }),
   }),
-  run: async ({ params, emit }) => {
+  run: async ({ params, emit, signal }) => {
     const capitalUsd = Number(params['capitalUsd'] ?? 1000)
     const wantSides = String(params['sides'] ?? 'both') as 'both' | 'long' | 'short'
     const marginUse = Number(params['marginUse'] ?? 0.8)
@@ -145,6 +145,7 @@ export const scanIncentivesScript: ScriptDefinition = {
 
     const plans: MarketPlan[] = []
     for (const m of markets) {
+      if (signal?.aborted) { emit?.('stopped — ranking what was scanned so far'); break }
       let campaign: { addLiquidityIncentive?: Record<'long' | 'short', SideCampaign | undefined> }
       try { campaign = (await api.miscellaneous.incentivesControllerGetMakerIncentiveCampaign(m.marketId)).data as typeof campaign } catch { continue }
       const live = (['long', 'short'] as const).filter(sd => (campaign.addLiquidityIncentive?.[sd]?.budgetPerHour ?? 0) > 0 && (wantSides === 'both' || wantSides === sd))
