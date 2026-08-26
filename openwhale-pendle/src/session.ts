@@ -330,15 +330,20 @@ export class BorosSession {
     const res = (await this.api.accounts.accountsV2ControllerGetMarketAccInfosByRoot({ root })).data as unknown as {
       results?: Array<{ marketAcc: string; totalCash: string; netBalance: string }>
     }
-    return (res.results ?? []).map(a => {
-      const { tokenId, marketId } = MarketAccLib.unpack(a.marketAcc as `0x${string}`)
-      return {
+    // The root's list spans every sub-account; this session IS one sub-account,
+    // so balances of the others must not leak into its equity (seen live: a
+    // sub-account-1 credential showing sub-account 0's collateral while its
+    // positions and orders — correctly filtered — came back empty).
+    return (res.results ?? []).flatMap(a => {
+      const { tokenId, marketId, accountId } = MarketAccLib.unpack(a.marketAcc as `0x${string}`)
+      if (accountId !== this.accountId) return []
+      return [{
         marketAcc: a.marketAcc,
         tokenId,
         ...(marketId !== CROSS_MARKET_ID ? { marketId } : {}),
         netBalance: toYu(a.netBalance),
         totalCash: toYu(a.totalCash),
-      }
+      }]
     })
   }
 

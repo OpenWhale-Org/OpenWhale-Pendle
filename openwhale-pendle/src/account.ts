@@ -60,6 +60,7 @@ function valueUsd(tokenId: number, symbol: string, amount: number, prices: Map<n
     {
       method: 'summary', title: 'Summary', kind: 'keyvalue',
       columns: [
+        { key: 'subAccount', label: 'Sub-account id', format: 'number', digits: 0 },
         { key: 'equityUsd', label: 'Equity (USD)', format: 'usd' },
         { key: 'gasUsd', label: 'Gas balance', format: 'usd', digits: 2 },
         { key: 'agentExpiresAt', label: 'Agent expires', format: 'time' },
@@ -174,7 +175,7 @@ export class BorosRatesAccount {
   }
 
   /** One-glance facts: equity, the relay fuel gauge, when the agent approval lapses. */
-  async summary(): Promise<{ equityUsd: number; gasUsd?: number; agentExpiresAt?: number; accounts: number }> {
+  async summary(): Promise<{ subAccount: number; equityUsd: number; gasUsd?: number; agentExpiresAt?: number; accounts: number }> {
     const [infos, symbols, prices, gas, expiry] = await Promise.all([
       this.session.accountInfos(),
       this.session.assets(),
@@ -184,6 +185,7 @@ export class BorosRatesAccount {
     ])
     const equityUsd = infos.reduce((acc, a) => acc + (valueUsd(a.tokenId, symbols.get(a.tokenId) ?? '', a.netBalance, prices) ?? 0), 0)
     return {
+      subAccount: this.session.accountId,
       equityUsd,
       ...(gas !== undefined ? { gasUsd: gas } : {}),
       ...(expiry !== undefined && expiry > 0 ? { agentExpiresAt: expiry * 1000 } : {}),
