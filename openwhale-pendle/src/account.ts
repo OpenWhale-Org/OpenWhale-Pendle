@@ -1,6 +1,6 @@
 import { OwAccount } from '@openwhaleorg/core'
 import { BOROS_LOGO } from './brand.js'
-import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode } from './session.js'
+import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode, BorosSide } from './session.js'
 
 /**
  * Read-only view of a Boros account — the 'pendle/rates' kind's canonical
@@ -216,6 +216,16 @@ export class BorosRatesAccount {
 
   gasBalance(): Promise<number> {
     return this.session.gasBalance()
+  }
+
+  /** Margin the venue asks per YU to rest at this rate (linear in size). */
+  marginPerYu(args: { marketId: number; side: BorosSide; apr: number }): Promise<number> {
+    return this.session.marginPerYu(args)
+  }
+
+  /** Equity of the one margin account these orders live in. */
+  marginBalance(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<number> {
+    return this.session.marginBalance(marketId, tokenId, mode)
   }
 
   quote(marketId: number): Promise<BorosMarketQuote> {

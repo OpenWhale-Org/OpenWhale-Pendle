@@ -84,7 +84,12 @@ const SHARE_HTML = `<!doctype html><html><head><meta charset="utf-8">${STYLE}</h
 var v = {};
 function num(name, dflt) { var x = parseFloat(v[name]); return isFinite(x) ? x : dflt; }
 function draw() {
-  var size = num('sizeYu', 10);
+  // Percent mode has no size to show — it is whatever the balance allows at
+  // the moment of quoting. The shape of the curve is the point either way, so
+  // it is drawn against a stand-in and labelled as one rather than quoting a
+  // sizeYu that mode is ignoring.
+  var percent = String(v['sizeMode'] || 'fixed') === 'percent';
+  var size = percent ? 100 : num('sizeYu', 10);
   var W = Math.max(320, document.body.clientWidth - 26);
   var svg = document.getElementById('s');
   svg.setAttribute('width', W);
@@ -101,7 +106,7 @@ function draw() {
     g += '<text x="' + (x + barW / 2) + '" y="' + (baseY - h - 5) + '" class="val" text-anchor="middle">' + (share * 100).toFixed(1) + '%</text>';
     g += '<text x="' + (x + barW / 2) + '" y="' + (baseY + 14) + '" class="lbl" text-anchor="middle">pool ' + pool + ' YU</text>';
   });
-  g += '<text x="' + x0 + '" y="20" class="val">Share of the side budget with ' + size + ' YU in band, by pool size. Reward/h = budget × share.</text>';
+  g += '<text x="' + x0 + '" y="20" class="val">Share of the side budget with ' + size + ' YU in band' + (percent ? ' (example — percent mode sizes from your margin)' : '') + ', by pool size. Reward/h = budget × share.</text>';
   g += '<text x="' + x0 + '" y="160" class="lbl">Every YU in band earns the same — the edge is as good as the touch. Small pools pay.</text>';
   svg.innerHTML = g;
 }
@@ -111,6 +116,6 @@ draw();
 </script></body></html>`
 
 export const makerIllustrations: ParamIllustration[] = [
-  { section: 'Size', title: 'Reward share — what sizeYu buys', html: SHARE_HTML, height: 185 },
+  { section: 'Size', title: 'Reward share — what order size buys', html: SHARE_HTML, height: 185 },
   { section: 'Corridor', title: 'The corridor — where orders rest and when they move', html: CORRIDOR_HTML, height: 225 },
 ]

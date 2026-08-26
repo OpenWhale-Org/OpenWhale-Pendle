@@ -534,6 +534,42 @@ export class BorosSession {
     return typeof actual === 'number' ? actual : args.apr
   }
 
+  /**
+   * Margin the venue asks per YU to rest at this rate.
+   *
+   * One anonymous simulation answers for every size: the requirement is
+   * linear in size, so a probe of 100 YU divided by 100 is the unit price.
+   * Anonymous because this is a question about the MARKET's rules, not about
+   * what this account can afford — the caller supplies the balance.
+   *
+   * The rate matters: margin scales with how far the order sits from mid, so
+   * probing at a rate other than where the order will rest gives a number
+   * that does not describe the order being sized.
+   */
+  async marginPerYu(args: { marketId: number; side: BorosSide; apr: number }): Promise<number> {
+    const probeYu = 100
+    const sim = (await this.api.simulations.simulationsControllerSimulatePlaceOrderAnonymous({
+      marketId: args.marketId, side: args.side === 'long' ? 0 : 1, size: fromYu(probeYu).toString(), rate: args.apr, tif: 3,
+    })).data as { marginRequired?: string }
+    if (sim.marginRequired === undefined) throw new Error(`market ${args.marketId}: the venue returned no margin requirement`)
+    return toYu(sim.marginRequired) / probeYu
+  }
+
+  /**
+   * The equity of the ONE margin account these orders live in.
+   *
+   * Not the sum across accounts: an isolated market's collateral cannot back
+   * a cross order, and the other sub-accounts are not this session's at all
+   * (accountInfos already filters those out). Sizing against a total that
+   * includes margin the order could never draw on would ask the venue for
+   * more than it will give.
+   */
+  async marginBalance(marketId: number, tokenId: number, mode: BorosMarginMode = 'cross'): Promise<number> {
+    const infos = await this.accountInfos()
+    const match = infos.find(a => a.tokenId === tokenId && (mode === 'isolated' ? a.marketId === marketId : a.marketId === undefined))
+    return match?.netBalance ?? 0
+  }
+
   async close(): Promise<void> {
     // REST + http transports: nothing persistent to release
   }

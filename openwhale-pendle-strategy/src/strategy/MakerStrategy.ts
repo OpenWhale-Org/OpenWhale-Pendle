@@ -52,9 +52,18 @@ interface Baseline {
   takenAt: number
 }
 
+/** What the venue asks per YU, and when we last asked. */
+interface MarginProbe {
+  perYu: number
+  apr: number
+  ts: number
+}
+
 interface MakerState {
   long?: SideState
   short?: SideState
+  /** Per side, percent mode only — refreshed no faster than a re-quote could act on it. */
+  probe?: Partial<Record<BorosSide, MarginProbe>>
   /** What the cross account held at the last activation — never touched. */
   baseline?: Baseline
   /** Last flatten emission — one accident, one flatten. */
@@ -94,9 +103,21 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   })
 
   readonly tunableParamsSchema = z.object({
+    sizeMode: z.enum(['fixed', 'percent']).default('fixed').meta({
+      section: 'Size', displayName: 'Size mode',
+      description: 'fixed = the same YU every time. percent = a share of what this account\'s margin can open right now, recomputed every tick — the size follows the balance up and down.',
+    }),
     sizeYu: z.number().positive().default(10).meta({
       section: 'Size', displayName: 'Order size per side (YU)',
-      description: '1 YU = 1 unit of the market\'s collateral token of funding notional. Reward share = sizeYu / (pool + sizeYu) per side.',
+      description: 'Fixed mode only. 1 YU = 1 unit of the market\'s collateral token of funding notional. Reward share = sizeYu / (pool + sizeYu) per side.',
+    }),
+    sizePercent: z.number().min(1).max(100).default(75).meta({
+      section: 'Size', displayName: 'Size (% of margin capacity)',
+      description: 'Percent mode only. Capacity = this margin account\'s equity ÷ what the venue asks per YU at the resting rate, minus whatever the baseline already occupies. Applied PER SIDE, not split between them: on a rate market the two sides largely offset, so 75% means 75% on each.',
+    }),
+    resizeTolerance: z.number().min(0.01).max(1).default(0.1).meta({
+      section: 'Size', displayName: 'Resize threshold (× size)',
+      description: 'Percent mode only. Re-quote when the target size drifts this far from what is resting. Capacity moves with every mark-to-market tick, and each re-quote is a relayed transaction that costs gas — without a threshold the strategy would spend the day paying to chase noise.',
     }),
     sides: z.enum(['both', 'long', 'short']).default('both').meta({
       section: 'Size', displayName: 'Sides',
@@ -180,12 +201,20 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
         account.crossPosition(marketId, tokenId, mode).catch(() => undefined),
         account.restingOrders(marketId, tokenId, mode).catch(() => []),
       ])
-      // Our own leftovers from before a restart must not become baseline, or
-      // every restart stacks a fresh pair on top of the old one. An order is
-      // ours when it has exactly our size and rests inside the band on its
-      // side — the operator's hand-placed orders never match that signature.
+      /* Our own leftovers from before a restart must not become baseline, or
+         every restart stacks a fresh pair on top of the old one.
+ 
+         In FIXED mode an order is ours when it has exactly our size and rests
+         inside the band — a signature the operator's hand-placed orders never
+         match by accident. PERCENT mode gives that up: our size is by
+         construction whatever the balance allowed at the time, so a leftover
+         from before a restart matches nothing, and testing it would file our
+         own order as untouchable. Band position is what remains, and it is
+         weaker — a hand-placed order resting in the band on a percent-mode
+         instance will be adopted and re-quoted away. Which is the reason the
+         class docstring asks for a dedicated sub-account. */
       const isOurs = (o: { side: BorosSide; apr: number; sizeYu: number }) => {
-        if (Math.abs(o.sizeYu - t.sizeYu) > 1e-9) return false
+        if (t.sizeMode === 'fixed' && Math.abs(o.sizeYu - t.sizeYu) > 1e-9) return false
         const band = sample.band[o.side]
         const distance = o.side === 'long' ? sample.midApr - o.apr : o.apr - sample.midApr
         return distance >= -band.range && distance <= band.range * 1.5
@@ -229,8 +258,59 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     if (state.gasPaused) { state.gasPaused = false; await this.store.set(STATE_KEY, state) }
 
     // ── Corridor per side (only OUR orders count — baseline ones are invisible here) ──
-    const resting = (await account.restingOrders(marketId, tokenId, mode).catch(() => [])).filter(o => !protectOrderIds.includes(o.orderId))
+    const allResting = await account.restingOrders(marketId, tokenId, mode).catch(() => [])
+    const resting = allResting.filter(o => !protectOrderIds.includes(o.orderId))
     const sides: BorosSide[] = t.sides === 'both' ? ['long', 'short'] : [t.sides]
+
+    /* ── Size ─────────────────────────────────────────────────────────────
+       Fixed mode is a number the operator typed. Percent mode is a number the
+       BALANCE decides, recomputed here every tick:
+
+         capacity = margin account equity ÷ margin the venue asks per YU
+         free     = capacity − what the baseline already occupies
+         size     = free × percent
+
+       The margin figure is this ONE account's equity, not the account's free
+       margin: free margin nets out the orders we ourselves have resting, so
+       sizing against it would shrink the target every time we filled it —
+       750 YU resting, 187 next tick, 608 the tick after, for ever, paying gas
+       on every swing. Equity does not move when we quote against it.
+
+       The baseline is subtracted because it is untouchable: its position and
+       its orders hold margin this strategy may never reclaim, so counting it
+       as capacity would size orders the venue then refuses.
+
+       `percent` applies PER SIDE rather than splitting between them — on a
+       rate market a long and a short largely offset, so 75% means 75% on
+       each. If a venue ever stops netting them the second side is what gets
+       rejected, which is why the numbers are logged. */
+    const baselineYu = Math.abs(baseline.signedSizeYu)
+      + allResting.filter(o => protectOrderIds.includes(o.orderId)).reduce((a, o) => a + o.sizeYu, 0)
+
+    const targetSizeFor = async (side: BorosSide, apr: number): Promise<number | undefined> => {
+      if (t.sizeMode === 'fixed') return t.sizeYu
+      // Refreshed no faster than a re-quote could act on it — the probe is a
+      // network round-trip and the corridor cannot move within one interval.
+      const cached = state.probe?.[side]
+      let perYu = cached && cached.ts > now - t.requoteIntervalMs ? cached.perYu : undefined
+      if (perYu === undefined) {
+        perYu = await account.marginPerYu({ marketId, side, apr }).catch((err: unknown) => {
+          log.warn({ marketId, side, err }, 'margin probe failed — not sizing this side on a guess')
+          return undefined
+        })
+        if (perYu === undefined || !(perYu > 0)) return undefined
+        state.probe = { ...state.probe, [side]: { perYu, apr, ts: now } }
+      }
+      const equity = await account.marginBalance(marketId, tokenId, mode).catch(() => undefined)
+      if (equity === undefined) return undefined
+      const capacityYu = equity / perYu
+      const freeYu = Math.max(0, capacityYu - baselineYu)
+      // Whole YU on stable collateral, two decimals where one YU is a whole BTC
+      const raw = (freeYu * t.sizePercent) / 100
+      const sized = raw >= 100 ? Math.floor(raw) : Math.floor(raw * 100) / 100
+      log.info({ marketId, side, equity, perYu, capacityYu, baselineYu, percent: t.sizePercent, sized }, 'sized from margin')
+      return sized > 0 ? sized : undefined
+    }
     // Everything this tick wants goes out as ONE requote instruction — the
     // executor turns it into a single relayed transaction (one gas charge).
     const orders: Array<{ side: BorosSide; sizeYu: number; apr: number; keepInside: number }> = []
@@ -241,9 +321,17 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       const mine = resting.filter(o => o.side === side)
       const restingApr = mine[0]?.apr ?? (dryRun ? state[side]?.apr : undefined)
       const verdict = judgeSide({ side, mid: sample.midApr, range: band.range, restingApr, params: t })
+      const sizeYu = await targetSizeFor(side, verdict.targetApr)
+      if (sizeYu === undefined) continue   // capacity unknown or spent — leave what is resting alone
+      /* The corridor decides WHERE, the balance decides HOW MUCH, and either
+         can call for a re-quote on its own: a size that has drifted past the
+         threshold is as much a reason to move as an order out of band. */
+      const drift = mine.length === 1 ? Math.abs(mine[0]!.sizeYu - sizeYu) / sizeYu : Infinity
+      const resize = t.sizeMode === 'percent' && mine.length === 1 && drift > t.resizeTolerance
       // More than one of ours on a side (a restart, a lagging read) → a quote
       // consolidates: the executor cancels all of them and rests exactly one.
-      if (verdict.action === 'keep' && mine.length <= 1) continue
+      if (verdict.action === 'keep' && mine.length <= 1 && !resize) continue
+      if (resize) log.info({ market, side, resting: mine[0]!.sizeYu, target: sizeYu, drift }, 'size drifted past the threshold — re-quoting')
       if (mine.length > 1) log.warn({ market, side, count: mine.length }, 'several own orders resting — consolidating to one')
       // One emission per side per interval — for 'place' too: the contract
       // read lags the relay by a few seconds, so a fresh order is invisible on
@@ -251,7 +339,7 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       if ((state[side]?.ts ?? 0) > now - t.requoteIntervalMs) continue
       log.info({ marketId, side, action: verdict.action, apr: verdict.targetApr, reason: verdict.reason, mid: sample.midApr }, 'quoting')
       // The band edge itself rides along: the executor makes sure the venue's tick rounding keeps the order inside it
-      orders.push({ side, sizeYu: t.sizeYu, apr: verdict.targetApr, keepInside: side === 'long' ? sample.midApr - band.range : sample.midApr + band.range })
+      orders.push({ side, sizeYu, apr: verdict.targetApr, keepInside: side === 'long' ? sample.midApr - band.range : sample.midApr + band.range })
       state[side] = { apr: verdict.targetApr, ts: now }
     }
     // Sides we no longer quote (config narrowed) get cleaned up once
