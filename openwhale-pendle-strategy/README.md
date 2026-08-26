@@ -46,7 +46,8 @@ One instance quotes one Boros market: it rests a post-only order at the far edge
 - **Band.** Each market side (long / short) may run a maker-incentive campaign: an hourly budget paid to orders resting within `±range` of the mid implied APR. Distance does not matter — every YU in band earns the same.
 - **Corridor.** The strategy rests at `edgeRatio × range` from mid (the far edge — least fill risk, same reward). It leaves the order alone while its distance to mid stays inside `[safeDistanceRatio × range, range]`, and re-quotes only when the order drifts out of the band or mid comes too close.
 - **One transaction per tick.** All cancels and places of a tick go out as a single relayed Arbitrum transaction (`requote`), paid from the account's USD gas balance — about $0.01–0.02 per re-quote.
-- **Accidents.** A fill is not a goal. When the position deviates from the baseline, the deviation is flattened at once with an IOC and quoting resumes.
+- **Size.** Fixed, or a percentage of what the account's margin can currently open — recomputed every tick, so the size follows the balance instead of a number typed once. See [Sizing](#sizing).
+- **Accidents.** A fill is not a goal. The venue is asked what closing would actually cost, and that answer decides whether to cross now or wait. No new edge orders go out until the position is flat. See [After a fill](#after-a-fill).
 - **Baseline.** At activation the strategy snapshots what the account already holds on the market (position + resting orders) and never touches it. Run on a dedicated sub-account when you can.
 
 At steady state the strategy holds at most one order per side: **two orders in `both` mode, one in `long` / `short` mode** — plus whatever the baseline holds.
@@ -73,8 +74,31 @@ At steady state the strategy holds at most one order per side: **two orders in `
 
 | Param | Default | Meaning |
 |---|---|---|
-| `sizeYu` | `10` | Order size per side in YU (1 YU = 1 unit of the collateral token of funding notional). Reward share per side = `sizeYu / (pool + sizeYu)`. |
+| `sizeMode` | `fixed` | `fixed` = the same YU every time. `percent` = a share of what the margin can open right now, recomputed every tick. |
+| `sizeYu` | `10` | **Fixed mode.** Order size per side in YU (1 YU = 1 unit of the collateral token of funding notional). Reward share per side = `sizeYu / (pool + sizeYu)`. |
+| `sizePercent` | `75` | **Percent mode.** Share of capacity, applied *per side* rather than split between them. |
+| `resizeTolerance` | `0.1` | **Percent mode.** Re-quote when the target drifts this far from what is resting. |
 | `sides` | `both` | `both` rests one order per side; `long` / `short` only that side. Each side has its own budget and pool. |
+
+##### Sizing
+
+Percent mode computes, per side and per tick:
+
+```
+capacity = this margin account's equity ÷ margin the venue asks per YU at the resting rate
+free     = capacity − whatever the baseline already occupies
+size     = free × sizePercent
+```
+
+The margin figure is the account's **equity**, not its free margin. Free margin nets out the orders the strategy itself has resting, so sizing against it shrinks the target every time it is met — 750 YU resting, 187 the next tick, 608 the one after, for ever, paying a relayed transaction on every swing. Equity does not move when we quote against it.
+
+The baseline is subtracted because it is untouchable: its position and orders hold margin the strategy may never reclaim, and counting that as capacity produces orders the venue then rejects.
+
+`sizePercent` applies to **each side**, not split between them — on a rate market a long and a short largely offset, so `75` means 75 % on each. Every input to the number is logged; if a venue ever stops netting the two, the second side is what gets rejected.
+
+`resizeTolerance` is not a nicety. Capacity moves with every mark-to-market tick and each re-quote is a relayed transaction that costs gas; without a threshold the strategy spends the day paying to chase noise.
+
+> **Percent mode needs a dedicated sub-account.** Baseline detection recognises the strategy's own leftovers after a restart by their exact size — a signature percent mode cannot have, since the size was whatever the balance allowed at the time. Band position is what remains, and it is weaker: a hand-placed order resting in the band will be adopted and re-quoted away.
 
 #### Corridor
 
@@ -89,7 +113,43 @@ At steady state the strategy holds at most one order per side: **two orders in `
 | Param | Default | Meaning |
 |---|---|---|
 | `gasFloorUsd` | `3` | Relayed actions are paid from the account's on-chain USD gas balance. Below this, quoting pauses (an empty balance fails silently on the venue). |
-| `flattenSlippage` | `0.02` | After an accidental fill, how far past the touch the flatten IOC may reach, as a fraction of APR. |
+| `flattenSlippage` | `0.02` | The limit on the closing IOC itself — how far past the touch it may reach before giving up. Not the decision of whether to cross; that is Fill. |
+
+#### Fill
+
+| Param | Default | Meaning |
+|---|---|---|
+| `fillSlippage` | `0.005` | Cross straight away when the simulated close lands within this of the touch. `0` = always cross, whatever it costs. |
+| `fillPolicy` | `limit` | What to do when it does not: `limit`, `partial`, `ladder`, `hold`. |
+| `fillTimeoutMs` | `600000` | Cross regardless once the position has been open this long. `0` = never. |
+| `fillStopDistance` | `0.15` | Cross regardless once mid has moved this far against the position, as a fraction of the entry rate. `0` = off. **Synthetic** — see below. |
+| `fillSlices` | `4` | Ladder policy only. |
+| `fillSliceIntervalMs` | `60000` | Ladder policy only. |
+
+##### After a fill
+
+A maker-reward strategy wants no position, so a fill is damage — and getting flat is a choice between two costs. Crossing pays the spread plus whatever depth the book lacks, and pays it now. Resting pays nothing but has no deadline, and every second the rate is free to move further away.
+
+Which is why the immediate IOC was the wrong default for the commonest case: an order at the band edge is usually taken *because the market moved to it*, so crossing straight back realises the spread and the taker fee on an adverse move.
+
+So the venue simulates the whole close against the resting book and answers with the average rate it would actually get — not the spread, which is only what the first YU pays. That number, against `fillSlippage`, decides:
+
+| Policy | Above budget it… |
+|---|---|
+| `limit` | rests a post-only close at the touch and waits |
+| `partial` | crosses the size the book absorbs within budget, rests the remainder |
+| `ladder` | crosses one slice per interval, resting between them |
+| `hold` | keeps the position and cancels our orders |
+
+Measured against the **touch**, never the entry. The entry is sunk and says nothing about whether crossing now is expensive; deciding from it produces the exact wrong reflex — the further underwater, the more reluctant to close.
+
+Two overrides sit above every policy, because "wait for a better price" is a plan with no end: `fillTimeoutMs` and `fillStopDistance`. They fire even when the venue will not price the close, because a book too broken to quote is when a stop matters most. Without an override, an unpriceable close rests rather than crossing blind.
+
+**The stop is synthetic.** Boros has no conditional orders — its `TimeInForce` set is GTC / IOC / FOK / ALO only — so the strategy watches the rate and fires the IOC itself. It protects while the engine is running, reacts no faster than one tick, and does not protect through a restart. Better than nothing, and not what a venue stop would be.
+
+While any of this is going on the strategy places **no new edge orders**: the band edge is where fills come from, and adding more while already holding inventory is how one bad tick becomes a position. `hold` cancels ours too — not closing is not the same as leaving orders resting.
+
+The ladder slices the size at *detection* rather than the remainder, or it is Zeno's ladder: every step smaller than the last, arriving never. Each slice is its own relayed transaction with its own gas — split finer than the spread being saved and the ladder costs more than crossing once.
 
 ### Executor actions (`pendle-strategy/maker`)
 
@@ -107,7 +167,7 @@ Everything the strategy does goes through this executor; the dashboard's **Manua
 | `requote` | `orders[] {side, sizeYu, apr}`, `cancelSides[]` | **One transaction:** cancels every non-protected order on each touched side, then rests the new orders. The strategy's tick. |
 | `quote` | `side`, `sizeYu`, `apr` | Single-side convenience form of `requote`. |
 | `cancel` | `side?`, `orderIds?` | Cancel non-protected orders on a side (or both sides); `orderIds` narrows to specific ids. |
-| `flatten` | `baselineSizeYu`, `slippage` | Cancel own orders and IOC the position back to `baselineSizeYu`. |
+| `flatten` | `baselineSizeYu`, `slippage`, `how`, `maxSizeYu?` | Move the position back toward `baselineSizeYu`. `how: 'ioc'` crosses; `how: 'limit'` rests a post-only close at the touch (idempotent — an existing close of the right side and size is left to keep its queue position). `maxSizeYu` caps the slice. The size is re-read from the venue, not taken from the caller: a partial fill landing between decision and execution is how a flatten overshoots into a position facing the other way. |
 | `simulate*` | same | Log the exact venue call without sending — what dry run uses. |
 
 `apr` is a decimal implied APR (`0.068` = 6.8 %, negatives are allowed). `sizeYu` is in YU.
