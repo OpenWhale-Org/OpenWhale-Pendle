@@ -8,6 +8,13 @@ import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode } 
  * market positions via contract reads, the USD gas balance (the requote
  * loop's fuel gauge), and the agent approval's expiry.
  */
+/** USD value of a collateral amount: the venue's price when it has one, 1:1 for a stable it does not price. */
+function valueUsd(tokenId: number, symbol: string, amount: number, prices: Map<number, number>): number | undefined {
+  const price = prices.get(tokenId)
+  if (price !== undefined) return amount * price
+  return /USD/i.test(symbol) ? amount : undefined
+}
+
 @OwAccount({
   id: 'boros-account', kind: 'pendle/rates', venue: 'boros', displayName: 'Boros Account', logo: BOROS_LOGO,
   // What the Accounts page shows for a Boros account — declared here, rendered
@@ -53,7 +60,7 @@ import type { BorosSession, BorosOpenOrder, BorosMarketQuote, BorosMarginMode } 
     {
       method: 'summary', title: 'Summary', kind: 'keyvalue',
       columns: [
-        { key: 'equityUsd', label: 'Equity (stables)', format: 'usd' },
+        { key: 'equityUsd', label: 'Equity (USD)', format: 'usd' },
         { key: 'gasUsd', label: 'Gas balance', format: 'usd', digits: 2 },
         { key: 'agentExpiresAt', label: 'Agent expires', format: 'time' },
         { key: 'accounts', label: 'Margin accounts', format: 'number', digits: 0 },
@@ -72,13 +79,14 @@ export class BorosRatesAccount {
 
   /**
    * Balances per margin account, in the venue's own equity figure (netBalance
-   * = cash + unrealised + settlement). Stable-token accounts value 1:1 USD;
-   * other collateral is listed unvalued. The USD gas balance rides along.
+   * = cash + unrealised + settlement), valued in USD at the venue's own asset
+   * prices (stables 1:1 when a price is missing). The USD gas balance rides along.
    */
   async balance(): Promise<{ usd: { available: number; total: number }; tokens: Array<{ token: string; free: number; locked: number; total: number; usdValue?: number }> }> {
-    const [infos, symbols, gas, markets] = await Promise.all([
+    const [infos, symbols, prices, gas, markets] = await Promise.all([
       this.session.accountInfos(),
       this.session.assets(),
+      this.session.assetPrices().catch(() => new Map<number, number>()),
       this.session.gasBalance().catch(() => undefined),
       this.session.listLiveMarkets().catch(() => []),
     ])
@@ -87,13 +95,13 @@ export class BorosRatesAccount {
       .filter(a => Math.abs(a.netBalance) > 1e-9 || Math.abs(a.totalCash) > 1e-9)
       .map(a => {
         const sym = symbols.get(a.tokenId) ?? `token#${a.tokenId}`
-        const stable = /USD/i.test(sym)
+        const usd = valueUsd(a.tokenId, sym, a.netBalance, prices)
         return {
           token: `${sym} · ${a.marketId !== undefined ? `isolated ${marketSymbol.get(a.marketId) ?? a.marketId}` : 'cross'}`,
           free: a.netBalance,
           locked: Math.max(0, a.totalCash - a.netBalance),
           total: a.netBalance,
-          ...(stable ? { usdValue: a.netBalance } : {}),
+          ...(usd !== undefined ? { usdValue: usd } : {}),
         }
       })
     if (gas !== undefined) tokens.push({ token: 'GAS (USD)', free: gas, locked: 0, total: gas, usdValue: gas })
@@ -148,31 +156,33 @@ export class BorosRatesAccount {
 
   /** Margin accounts (cross per token, isolated per market) with the venue's own balances. */
   async margin(): Promise<Array<{ account: string; token: string; netBalance: number; totalCash: number; usdValue?: number }>> {
-    const [infos, symbols, markets] = await Promise.all([this.session.accountInfos(), this.session.assets(), this.session.listLiveMarkets().catch(() => [])])
+    const [infos, symbols, prices, markets] = await Promise.all([this.session.accountInfos(), this.session.assets(), this.session.assetPrices().catch(() => new Map<number, number>()), this.session.listLiveMarkets().catch(() => [])])
     const marketSymbol = new Map(markets.map(m => [m.marketId, m.symbol]))
     return infos
       .filter(a => Math.abs(a.netBalance) > 1e-9 || Math.abs(a.totalCash) > 1e-9)
       .map(a => {
         const token = symbols.get(a.tokenId) ?? `token#${a.tokenId}`
+        const usd = valueUsd(a.tokenId, token, a.netBalance, prices)
         return {
           account: a.marketId !== undefined ? `isolated · ${marketSymbol.get(a.marketId) ?? a.marketId}` : 'cross',
           token,
           netBalance: a.netBalance,
           totalCash: a.totalCash,
-          ...(/USD/i.test(token) ? { usdValue: a.netBalance } : {}),
+          ...(usd !== undefined ? { usdValue: usd } : {}),
         }
       })
   }
 
   /** One-glance facts: equity, the relay fuel gauge, when the agent approval lapses. */
   async summary(): Promise<{ equityUsd: number; gasUsd?: number; agentExpiresAt?: number; accounts: number }> {
-    const [infos, symbols, gas, expiry] = await Promise.all([
+    const [infos, symbols, prices, gas, expiry] = await Promise.all([
       this.session.accountInfos(),
       this.session.assets(),
+      this.session.assetPrices().catch(() => new Map<number, number>()),
       this.session.gasBalance().catch(() => undefined),
       this.session.agentExpiry().catch(() => undefined),
     ])
-    const equityUsd = infos.reduce((acc, a) => acc + (/USD/i.test(symbols.get(a.tokenId) ?? '') ? a.netBalance : 0), 0)
+    const equityUsd = infos.reduce((acc, a) => acc + (valueUsd(a.tokenId, symbols.get(a.tokenId) ?? '', a.netBalance, prices) ?? 0), 0)
     return {
       equityUsd,
       ...(gas !== undefined ? { gasUsd: gas } : {}),
@@ -181,10 +191,10 @@ export class BorosRatesAccount {
     }
   }
 
-  /** Equity sample for the runtime snapshotter — stable-collateral net balances (gas excluded). */
+  /** Equity sample for the runtime snapshotter — every margin account's net balance at the venue's USD price (gas excluded). */
   async snapshot(): Promise<{ equity: number }> {
-    const [infos, symbols] = await Promise.all([this.session.accountInfos(), this.session.assets()])
-    const equity = infos.reduce((acc, a) => acc + (/USD/i.test(symbols.get(a.tokenId) ?? '') ? a.netBalance : 0), 0)
+    const [infos, symbols, prices] = await Promise.all([this.session.accountInfos(), this.session.assets(), this.session.assetPrices().catch(() => new Map<number, number>())])
+    const equity = infos.reduce((acc, a) => acc + (valueUsd(a.tokenId, symbols.get(a.tokenId) ?? '', a.netBalance, prices) ?? 0), 0)
     return { equity }
   }
 

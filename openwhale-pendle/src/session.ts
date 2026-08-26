@@ -264,6 +264,16 @@ export class BorosSession {
   }
 
   private assetSymbols?: Map<number, string>
+  private assetPriceCache?: { at: number; prices: Map<number, number> }
+
+  /** USD price per collateral token id from the venue's asset list — refreshed every minute, since equity is valued with it. */
+  async assetPrices(): Promise<Map<number, number>> {
+    if (this.assetPriceCache && Date.now() - this.assetPriceCache.at < 60_000) return this.assetPriceCache.prices
+    const res = (await this.api.assets.assetsControllerListAssets({})).data as unknown as { results?: Array<{ tokenId: number; usdPrice?: string | number }> }
+    const prices = new Map((res.results ?? []).flatMap(a => { const p = Number(a.usdPrice); return p > 0 ? [[a.tokenId, p] as [number, number]] : [] }))
+    this.assetPriceCache = { at: Date.now(), prices }
+    return prices
+  }
   /** tokenId → collateral symbol, cached for the session. */
   async assets(): Promise<Map<number, string>> {
     if (this.assetSymbols) return this.assetSymbols
