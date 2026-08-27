@@ -89,7 +89,13 @@ export function setupAgentScript(credentials: CredentialStore): ScriptDefinition
  * the pool already resting in band. The pick comes with its reasons and the
  * strategy parameters to type in.
  */
-interface SideCampaign { incentiveRange: number; budgetPerHour: number; currentInRangeLiquidity: string }
+interface SideCampaign {
+  incentiveRange: number
+  budgetPerHour: number
+  currentInRangeLiquidity: string
+  /** Ceiling on what this side may pay out per hour, at the pool now in band. */
+  currentCappedDistributionPerHour?: number | null
+}
 interface SidePlan {
   side: 'long' | 'short'
   budgetPerHour: number
@@ -99,6 +105,10 @@ interface SidePlan {
   marginPerYu: number
   sizeYu: number
   share: number
+  /** PENDLE/h the side pays per YU in band once the ceiling is in force. */
+  capPerYu?: number | undefined
+  /** Budget share alone, before the ceiling — what the old scan reported. */
+  uncappedRewardPerHour: number
   rewardPerHour: number
 }
 interface MarketPlan {
@@ -115,6 +125,10 @@ interface MarketPlan {
   /** What the market can still pay before it matures (budget stops at expiry). */
   usdToMaturity: number
   aprOnCapital: number
+  /** The ceiling binds on at least one side — more capital buys nothing more. */
+  capped: boolean
+  /** The venue published no ceiling for a side, so this figure is unbounded above. */
+  capUnknown: boolean
 }
 
 /**
@@ -154,9 +168,26 @@ export function renderReport(input: {
   const bar = (frac: number, good = true) =>
     `<span class="bar${good ? ' g' : ''}" style="width:${(Math.max(0, Math.min(1, frac)) * 68).toFixed(1)}px"></span>`
 
+  /* The market name is the link. Boros has a page per market and the reader's
+     next move after reading a row is to look at that page, so the row should
+     not make them copy a symbol into a search box. Opened in a new tab: the
+     report is the thing they are working from and losing it to a navigation is
+     a worse outcome than an extra tab. */
+  const marketLink = (p: MarketPlan) =>
+    `<a class="jump" href="https://boros.pendle.finance/markets/${p.marketId}" target="_blank" rel="noopener noreferrer">${esc(p.symbol)}</a>`
+  /* Said in the table rather than only in a footnote, because a reader scanning
+     the APR column is deciding from that column alone. `at ceiling` is the
+     venue's own statement that the row cannot pay more; `no ceiling published`
+     is the absence of one, which makes the figure an upper bound rather than an
+     estimate — and above 500% it is the row to disbelieve, not the row to fund. */
+  const mark = (p: MarketPlan) =>
+    p.capUnknown
+      ? ` <span class="${p.aprOnCapital > 5 ? 'warn' : 'dim'}">no ceiling published</span>`
+      : p.capped ? ' <span class="dim">at ceiling</span>' : ''
+
   const byDay = plans.map((p, i) => `<tr>
     <td class="n dim">${i + 1}</td>
-    <td>${esc(p.symbol)}${p.isolatedOnly ? ' <span class="dim">isolated</span>' : ''}</td>
+    <td>${marketLink(p)}${p.isolatedOnly ? ' <span class="dim">isolated</span>' : ''}${mark(p)}</td>
     <td class="n">${money(p.usdPerDay)}${bar(p.usdPerDay / maxDay)}</td>
     <td class="n">${(p.rewardPerHour * 24).toFixed(2)}</td>
     <td class="n">${pct(p.aprOnCapital)}</td>
@@ -167,7 +198,7 @@ export function renderReport(input: {
 
   const byTotal = plans.slice().sort((a, b) => b.usdToMaturity - a.usdToMaturity).map((p, i) => `<tr>
     <td class="n dim">${i + 1}</td>
-    <td>${esc(p.symbol)}</td>
+    <td>${marketLink(p)}${mark(p)}</td>
     <td class="n">${money(p.usdToMaturity)}${bar(p.usdToMaturity / maxTotal)}</td>
     <td class="n">${money(p.usdPerDay)}</td>
     <td class="n">${p.daysToMaturity.toFixed(0)}d</td>
@@ -179,14 +210,19 @@ export function renderReport(input: {
     <td class="n">${num(s.poolYu, 0)}</td>
     <td class="n">${pct(s.share)}${bar(s.share)}</td>
     <td class="n">${s.budgetPerHour.toFixed(3)}</td>
-    <td class="n">${s.rewardPerHour.toFixed(4)}</td>
+    <td class="n">${s.capPerYu === undefined ? '<span class="warn">none</span>' : (s.capPerYu * s.sizeYu).toFixed(4)}</td>
+    <td class="n ${s.rewardPerHour < s.uncappedRewardPerHour - 1e-12 ? 'dim' : ''}">${s.rewardPerHour.toFixed(4)}</td>
     <td class="n">${pct(s.edgeApr, 2)}</td>
   </tr>`).join('')
 
   const body = `
 <section>
   <h2>Per day, at today's pool</h2>
-  <p class="note">What ${money(capitalUsd)} would earn resting at the band edge right now, ranked. The pool is what rests in band at this moment — others can join and dilute the share.</p>
+  <p class="note">What ${money(capitalUsd)} would earn resting at the band edge right now, ranked. The pool is what rests in band at this moment — others can join and dilute the share. Rows marked <span class="dim">at ceiling</span> are already paying the most the venue permits, so capital beyond the size shown earns the ceiling rate and nothing more.${
+    plans.some(p => p.capUnknown)
+      ? ` Rows marked <span class="warn">no ceiling published</span> had no ceiling to apply — their figures are bounded only by the budget, and any of them reading far above the rest is a row to check on the venue before funding.`
+      : ''
+  }</p>
   <div class="tblwrap"><table>
     <thead><tr><th class="n">#</th><th>Market</th><th class="n">$ / day</th><th class="n">PENDLE / day</th><th class="n">APR</th><th class="n">Left</th><th class="n">Band</th><th>Sides · size/pool share</th></tr></thead>
     <tbody>${byDay}</tbody>
@@ -204,9 +240,9 @@ export function renderReport(input: {
 
 <section>
   <h2>${esc(best.symbol)} — the pick</h2>
-  <p class="note">Reward share is size ÷ (pool + size). The band is not distance-weighted, so an order at the edge earns what one at the touch earns, at a fraction of the fill risk.</p>
+  <p class="note">Reward share is size ÷ (pool + size), and the reward is the smaller of that share of the budget and the side's own ceiling. The band is not distance-weighted, so an order at the edge earns what one at the touch earns, at a fraction of the fill risk.</p>
   <div class="tblwrap"><table class="slim">
-    <thead><tr><th>Side</th><th class="n">Our YU</th><th class="n">Pool YU</th><th class="n">Share</th><th class="n">Budget /h</th><th class="n">Reward /h</th><th class="n">Rests at</th></tr></thead>
+    <thead><tr><th>Side</th><th class="n">Our YU</th><th class="n">Pool YU</th><th class="n">Share</th><th class="n">Budget /h</th><th class="n">Ceiling /h</th><th class="n">Reward /h</th><th class="n">Rests at</th></tr></thead>
     <tbody>${shareRows}</tbody>
   </table></div>
   <ul class="note">${why.map(w => `<li>${esc(w.replace(/^•\s*/, ''))}</li>`).join('')}</ul>
@@ -237,11 +273,15 @@ export function renderReport(input: {
     figures: [
       { k: 'Best market', v: best.symbol },
       { k: 'Per day', v: money(best.usdPerDay), n: `${(best.rewardPerHour * 24).toFixed(2)} PENDLE`, cls: 'pos' },
-      { k: 'APR on capital', v: pct(best.aprOnCapital), cls: 'pos' },
+      {
+        k: 'APR on capital', v: pct(best.aprOnCapital),
+        cls: best.capUnknown && best.aprOnCapital > 5 ? 'warn' : 'pos',
+        ...(best.capped ? { n: 'at the venue ceiling' } : best.capUnknown ? { n: 'no ceiling published' } : {}),
+      },
       { k: 'To maturity', v: money(best.usdToMaturity), n: `${best.daysToMaturity.toFixed(0)} days left` },
     ],
     body,
-    footer: 'Margin per YU came from the venue\'s own anonymous order simulation at the band edge, so sizes reflect what it would actually ask. Pool sizes are what rests in band at the moment of the scan and move as others quote. Budgets are per epoch and can change. Dollar figures convert PENDLE at the price shown above.',
+    footer: 'Margin per YU came from the venue\'s own anonymous order simulation at the band edge, so sizes reflect what it would actually ask. Pool sizes are what rests in band at the moment of the scan and move as others quote. Budgets are per epoch and can change. Each side also carries a ceiling on what it may pay out, which the venue publishes against the pool currently in band; measured across every live market it is proportional to that pool, so it is applied here as a rate per YU that our own size earns at most — where it binds, a bigger position raises the reward but not the APR. Dollar figures convert PENDLE at the price shown above.',
   })
 }
 
@@ -312,7 +352,39 @@ export const scanIncentivesScript: ScriptDefinition = {
         if (sizeYu <= 0) return undefined
         const poolYu = Number(c.currentInRangeLiquidity) / 1e18
         const share = sizeYu / (poolYu + sizeYu)
-        return { side: sd, budgetPerHour: c.budgetPerHour, poolYu, range: c.incentiveRange, edgeApr, marginPerYu, sizeYu, share, rewardPerHour: c.budgetPerHour * share }
+        const uncappedRewardPerHour = c.budgetPerHour * share
+
+        /* The budget is not the only ceiling, and on most markets it is not the
+           binding one. Each side also publishes currentCappedDistributionPerHour
+           — what it may actually pay out against the pool resting in it right
+           now — and Boros' own frontend estimates a maker's reward from that
+           number rather than from the budget.
+        
+           Sampling every live market shows what the ceiling is: exactly
+           proportional to the pool. The two sides of one market imply the same
+           ceiling per YU whether $26 or $8,632 rests in them, and every market
+           sharing an expiry agrees to two decimal places. So it is a rate, not
+           an amount — cap ÷ pool — and joining with sizeYu lifts the ceiling to
+           cap × (pool + size) ÷ pool while taking share of it, which is
+           capPerYu × sizeYu with the pool cancelled out of both sides.
+        
+           That cancellation is the whole point. Below the ceiling, a small pool
+           is a windfall: the same budget split fewer ways. At the ceiling, pool
+           size stops mattering altogether and the reward is linear in our own
+           size alone. The markets this demotes are precisely the ones that used
+           to head the ranking — a near-empty band against a full budget, where
+           budget × share promised four-figure APRs the venue would never pay. */
+        const capPerYu = poolYu > 0 && typeof c.currentCappedDistributionPerHour === 'number'
+          ? c.currentCappedDistributionPerHour / poolYu
+          : undefined
+        const rewardPerHour = capPerYu === undefined
+          ? uncappedRewardPerHour
+          : Math.min(uncappedRewardPerHour, capPerYu * sizeYu)
+
+        return {
+          side: sd, budgetPerHour: c.budgetPerHour, poolYu, range: c.incentiveRange, edgeApr,
+          marginPerYu, sizeYu, share, capPerYu, uncappedRewardPerHour, rewardPerHour,
+        }
       }))).filter((x): x is SidePlan => x !== undefined)
 
       if (sides.length === 0) return undefined
@@ -322,6 +394,8 @@ export const scanIncentivesScript: ScriptDefinition = {
         marketId: m.marketId, symbol: m.imData.symbol, collateral: price?.symbol ?? String(m.tokenId), collateralUsd,
         isolatedOnly: m.imData.isIsolatedOnly === true, daysToMaturity: (m.imData.maturity - now) / 86400, midApr, sides,
         rewardPerHour, usdPerDay, usdToMaturity: usdPerDay * Math.max(0, (m.imData.maturity - now) / 86400), aprOnCapital: capitalUsd > 0 ? (usdPerDay * 365) / capitalUsd : 0,
+        capped: sides.some(s => s.rewardPerHour < s.uncappedRewardPerHour - 1e-12),
+        capUnknown: sides.some(s => s.capPerYu === undefined),
       }
     }
 
@@ -340,7 +414,10 @@ export const scanIncentivesScript: ScriptDefinition = {
       for (const p of results) {
         if (!p) continue
         plans.push(p)
-        emit?.(`${p.symbol}: ${p.rewardPerHour.toFixed(4)} PENDLE/h = ${(p.rewardPerHour * 24).toFixed(2)} PENDLE/day (≈ $${p.usdPerDay.toFixed(2)} at $${pendleUsd.toFixed(3)})`)
+        const note = p.capUnknown ? ' — no ceiling published, treat the figure as an upper bound'
+          : p.capped ? ` — at the venue's ceiling (budget share alone would read ${(p.sides.reduce((a, x) => a + x.uncappedRewardPerHour, 0) * 24).toFixed(2)}/day)`
+          : ''
+        emit?.(`${p.symbol}: ${p.rewardPerHour.toFixed(4)} PENDLE/h = ${(p.rewardPerHour * 24).toFixed(2)} PENDLE/day (≈ $${p.usdPerDay.toFixed(2)} at $${pendleUsd.toFixed(3)})${note}`)
       }
     }
     plans.sort((a, b) => b.usdPerDay - a.usdPerDay)
@@ -348,14 +425,26 @@ export const scanIncentivesScript: ScriptDefinition = {
 
     const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`
     const sideCell = (s: SidePlan) => `${s.side === 'long' ? 'L' : 'S'} ${s.sizeYu}YU/${s.poolYu.toFixed(0)} ${pct(s.share, 0)} of ${s.budgetPerHour.toFixed(2)}/h`
+    /* Two different warnings, and they must not be confused. `capped` is a
+       fact the venue told us: this row is already at its ceiling, and more
+       capital here buys nothing more. `?` is the absence of that fact — no
+       ceiling was published, so the figure has nothing bounding it from above,
+       and an implausible APR on such a row is a reason to distrust the row
+       rather than to fund it. */
+    const flag = (p: MarketPlan) => p.capUnknown ? (p.aprOnCapital > 5 ? ' ?!' : ' ? ') : p.capped ? ' ^ ' : '   '
     const rows = plans.map((p, i) =>
-      `${String(i + 1).padStart(2)}. ${p.symbol.padEnd(34)} ${(p.rewardPerHour * 24).toFixed(2).padStart(7)} PENDLE/d (≈$${p.usdPerDay.toFixed(2).padStart(6)}) ${pct(p.aprOnCapital).padStart(7)} APR  ${(p.rewardPerHour * 24 * p.daysToMaturity).toFixed(0).padStart(5)} PENDLE to expiry  ±${pct(p.sides[0]!.range, 2)}  ${p.daysToMaturity.toFixed(0).padStart(3)}d  ${p.sides.map(sideCell).join('  ')}`)
+      `${String(i + 1).padStart(2)}.${flag(p)}${p.symbol.padEnd(34)} ${(p.rewardPerHour * 24).toFixed(2).padStart(7)} PENDLE/d (≈$${p.usdPerDay.toFixed(2).padStart(6)}) ${pct(p.aprOnCapital).padStart(7)} APR  ${(p.rewardPerHour * 24 * p.daysToMaturity).toFixed(0).padStart(5)} PENDLE to expiry  ±${pct(p.sides[0]!.range, 2)}  ${p.daysToMaturity.toFixed(0).padStart(3)}d  ${p.sides.map(sideCell).join('  ')}`)
 
     const best = plans[0]!
     const second = plans[1]
     const why: string[] = []
     for (const s of best.sides) {
-      why.push(`• ${s.side}: $${(capitalUsd * marginUse / best.sides.length).toFixed(0)} of margin buys ${s.sizeYu} YU (the venue asks ${pct(s.marginPerYu, 2)} of notional per YU at ${pct(s.edgeApr, 2)} APR). Against the ${s.poolYu.toFixed(1)} YU already in band that is a ${pct(s.share)} share of the ${s.budgetPerHour.toFixed(3)} PENDLE/h budget → ${s.rewardPerHour.toFixed(4)} PENDLE/h.`)
+      const bound = s.capPerYu === undefined
+        ? ' The venue published no ceiling for this side, so nothing bounds that figure from above — treat it as optimistic.'
+        : s.rewardPerHour < s.uncappedRewardPerHour - 1e-12
+          ? ` That share alone would be ${s.uncappedRewardPerHour.toFixed(4)}/h, but the side's ceiling of ${s.capPerYu.toFixed(6)} PENDLE/h per YU in band caps it at ${s.rewardPerHour.toFixed(4)}/h — the ceiling rises with the pool, so adding size here earns the ceiling rate and not a point more.`
+          : ` The side's ceiling (${(s.capPerYu * s.sizeYu).toFixed(4)}/h at this size) is not binding yet.`
+      why.push(`• ${s.side}: $${(capitalUsd * marginUse / best.sides.length).toFixed(0)} of margin buys ${s.sizeYu} YU (the venue asks ${pct(s.marginPerYu, 2)} of notional per YU at ${pct(s.edgeApr, 2)} APR). Against the ${s.poolYu.toFixed(1)} YU already in band that is a ${pct(s.share)} share of the ${s.budgetPerHour.toFixed(3)} PENDLE/h budget → ${s.rewardPerHour.toFixed(4)} PENDLE/h.${bound}`)
     }
     why.push(`• Band ±${pct(best.sides[0]!.range, 2)} around a mid of ${pct(best.midApr, 2)}: resting at ${pct(edgeRatio, 0)} of the half-width keeps the order ${pct(best.sides[0]!.range * edgeRatio, 2)} from mid.`)
     why.push(`• ${best.daysToMaturity.toFixed(0)} days to maturity${best.daysToMaturity < 7 ? ` — the budget stops at expiry, so this is ≈ ${(best.rewardPerHour * 24 * best.daysToMaturity).toFixed(1)} PENDLE (≈ $${best.usdToMaturity.toFixed(0)}) in total; re-run the scan afterwards` : ''}${best.isolatedOnly ? ' · isolated-only market (marginMode auto → isolated)' : ''} · collateral ${best.collateral} ($${best.collateralUsd.toFixed(2)}).`)
@@ -374,6 +463,7 @@ export const scanIncentivesScript: ScriptDefinition = {
     ]
     const text = [
       `Ranked by PENDLE/day for $${capitalUsd} (${(marginUse * 100).toFixed(0)}% as margin, sides: ${wantSides}); $ figures are estimates at PENDLE $${pendleUsd.toFixed(3)}. Cells: side sizeYU/pool share-of-budget. 1 YU = 1 unit of the collateral token (a whole BTC on BTC-margined markets).`,
+      `Flags:  ^ = at the venue's ceiling, more capital earns the ceiling rate and no better APR   ? = no ceiling published, the figure is an upper bound   ?! = that, above 500% APR — check the market before funding it.`,
       ...rows,
       '',
       `── Best: ${best.symbol} ──────────────────────────────────────────`,
@@ -383,6 +473,7 @@ export const scanIncentivesScript: ScriptDefinition = {
       ...paramsBlock,
       '',
       'Caveats: the pool is what rests in band RIGHT NOW — others can join and dilute you; the budget is per epoch and can change; reward share is not distance-weighted, so the edge is as good as the touch. Margin per YU was read from the venue\'s own simulation at the band edge.',
+      'On the ceiling: each side publishes what it may pay out at the pool now in band, and across every live market that figure is proportional to the pool — so it is a rate per YU, and our size earns at most that rate. Below it the reward is the budget split by share, which rewards a thin pool; at it the pool cancels out and only our own size matters. A near-empty band against a full budget is the case where the two differ by orders of magnitude, and it is the case the old ranking put on top.',
     ].join('\n')
     const html = renderReport({ plans, capitalUsd, wantSides, marginUse, edgeRatio, pendleUsd, paramsBlock, why })
     return {
