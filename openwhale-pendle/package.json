@@ -1,6 +1,6 @@
 {
   "name": "@openwhaleorg/pendle",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Pendle venue plugin for OpenWhale — Pendle V2 (PT/YT) and Boros (interest-rate swaps) under one roof",
   "license": "MIT",
   "type": "module",
@@ -37,7 +37,7 @@
     "viem": "2.55.10"
   },
   "peerDependencies": {
-    "@openwhaleorg/core": "^0.2.0",
+    "@openwhaleorg/core": "^0.2.2",
     "@openwhaleorg/web3": "^0.1.0"
   },
   "devDependencies": {
