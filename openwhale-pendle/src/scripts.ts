@@ -116,6 +116,179 @@ interface MarketPlan {
   aprOnCapital: number
 }
 
+/**
+ * The scan as a page rather than a column of figures.
+ *
+ * The ranking is what the text report already gives; what it cannot give is
+ * the SHAPE of the field — whether the top market is twice the next or barely
+ * ahead, and how much of each one's reward survives its maturity. Both are
+ * comparisons across a nominal list, so both are bars, and days-to-maturity
+ * rides as a label rather than a second axis: two scales on one frame is the
+ * one chart mistake that reliably misleads.
+ *
+ * Self-contained by necessity — it renders in a sandboxed iframe with no
+ * same-origin and no network worth relying on, so no fonts, no CDN, no fetch.
+ */
+function renderReport(input: {
+  plans: MarketPlan[]
+  capitalUsd: number
+  wantSides: string
+  marginUse: number
+  edgeRatio: number
+  pendleUsd: number
+  paramsBlock: string[]
+  why: string[]
+}): string {
+  const { plans, capitalUsd, marginUse, edgeRatio, pendleUsd, paramsBlock, why } = input
+  const best = plans[0]!
+  const esc = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
+  const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`
+  const money = (x: number) => `$${x.toFixed(2)}`
+
+  const maxDay = Math.max(...plans.map(p => p.usdPerDay), 1e-9)
+  const maxTotal = Math.max(...plans.map(p => p.usdToMaturity), 1e-9)
+
+  /* One hue for magnitude — a single series needs no categorical palette, and
+     the title names it, so no legend either. Long and short DO need telling
+     apart, and that pair is validated against this surface for colour-vision
+     deficiency; they are also directly labelled, so identity never rests on
+     colour alone. */
+  const bar = (frac: number, label: string, sub: string, hue: string) => `
+    <div class="row">
+      <div class="rl">${label}</div>
+      <div class="rt"><div class="rf" style="width:${(Math.max(0, Math.min(1, frac)) * 100).toFixed(2)}%;background:${hue}"></div></div>
+      <div class="rv">${sub}</div>
+    </div>`
+
+  const rankRows = plans.map(p => bar(
+    p.usdPerDay / maxDay,
+    esc(p.symbol.length > 30 ? `${p.symbol.slice(0, 29)}…` : p.symbol),
+    `${money(p.usdPerDay)}/d · ${pct(p.aprOnCapital)} · ${p.daysToMaturity.toFixed(0)}d left`,
+    'var(--s1)',
+  )).join('')
+
+  const totalRows = plans
+    .slice()
+    .sort((a, b) => b.usdToMaturity - a.usdToMaturity)
+    .map(p => bar(
+      p.usdToMaturity / maxTotal,
+      esc(p.symbol.length > 30 ? `${p.symbol.slice(0, 29)}…` : p.symbol),
+      `${money(p.usdToMaturity)} over ${p.daysToMaturity.toFixed(0)}d`,
+      'var(--s1)',
+    )).join('')
+
+  // Part-to-whole: our size against the pool it dilutes into, per side.
+  const shareRows = best.sides.map(s => {
+    const hue = s.side === 'long' ? 'var(--long)' : 'var(--short)'
+    const ours = s.share
+    return `
+    <div class="row share-row">
+      <div class="rl">${s.side}</div>
+      <div class="rt">
+        <div class="rf" style="width:${(ours * 100).toFixed(2)}%;background:${hue}"></div>
+      </div>
+      <div class="rv">${s.sizeYu} of ${(s.poolYu + s.sizeYu).toFixed(0)} YU → ${pct(ours)} of ${s.budgetPerHour.toFixed(2)}/h</div>
+    </div>`
+  }).join('')
+
+  const tableRows = plans.map((p, i) => `
+    <tr>
+      <td class="n">${i + 1}</td>
+      <td>${esc(p.symbol)}${p.isolatedOnly ? ' <span class="tag">isolated</span>' : ''}</td>
+      <td class="n">${(p.rewardPerHour * 24).toFixed(2)}</td>
+      <td class="n">${money(p.usdPerDay)}</td>
+      <td class="n">${pct(p.aprOnCapital)}</td>
+      <td class="n">${money(p.usdToMaturity)}</td>
+      <td class="n">${p.daysToMaturity.toFixed(0)}d</td>
+      <td class="n">±${pct(p.sides[0]!.range, 2)}</td>
+      <td>${p.sides.map(s => `${s.side === 'long' ? 'L' : 'S'} ${s.sizeYu}/${s.poolYu.toFixed(0)} ${pct(s.share, 0)}`).join(' · ')}</td>
+    </tr>`).join('')
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Maker incentive scan</title>
+<style>
+  :root {
+    --bg:#101012; --panel:#17171a; --line:#26262b;
+    --ink:#d4d4d8; --ink2:#8b8b93;
+    --s1:#6366f1;            /* magnitude — one hue, one series */
+    --long:#6366f1; --short:#d97706;   /* validated pair, dark surface */
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:14px 16px 22px; background:var(--bg); color:var(--ink);
+         font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font-size:13px; margin:0 0 2px; font-weight:600; }
+  h2 { font-size:11px; margin:20px 0 8px; font-weight:600; color:var(--ink2);
+       text-transform:uppercase; letter-spacing:.08em; }
+  .sub { color:var(--ink2); margin:0 0 4px; }
+  .hero { display:flex; gap:22px; align-items:baseline; flex-wrap:wrap;
+          background:var(--panel); border:1px solid var(--line); border-radius:6px;
+          padding:12px 14px; margin-top:12px; }
+  .big { font-size:22px; font-weight:600; letter-spacing:-.01em; }
+  .unit { color:var(--ink2); font-size:11px; margin-left:4px; }
+  .kv { color:var(--ink2); }
+  .kv b { color:var(--ink); font-weight:600; }
+
+  .row { display:grid; grid-template-columns:minmax(0,15em) 1fr minmax(0,22em);
+         gap:10px; align-items:center; padding:2px 0; }
+  .rl { color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rt { height:12px; background:#1d1d21; border-radius:3px; overflow:hidden; }
+  .rf { height:100%; border-radius:0 3px 3px 0; }   /* anchored to the baseline */
+  .rv { color:var(--ink2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .share-row { grid-template-columns:minmax(0,6em) 1fr minmax(0,26em); }
+  @media (max-width:720px) { .row { grid-template-columns:minmax(0,10em) 1fr; } .rv { grid-column:2; } }
+
+  table { width:100%; border-collapse:collapse; margin-top:4px; }
+  th { text-align:left; font-weight:600; color:var(--ink2); font-size:10px;
+       text-transform:uppercase; letter-spacing:.06em; padding:4px 8px 4px 0;
+       border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:3px 8px 3px 0; border-bottom:1px solid #1c1c20; white-space:nowrap; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr:hover { background:#1b1b1f; }
+  .tag { color:var(--ink2); font-size:10px; }
+  .wrap { overflow-x:auto; }
+  ul { margin:6px 0; padding-left:16px; color:var(--ink); }
+  li { margin:3px 0; }
+  pre { background:var(--panel); border:1px solid var(--line); border-radius:6px;
+        padding:10px 12px; overflow-x:auto; margin:6px 0 0; color:var(--ink); }
+  .note { color:var(--ink2); margin-top:14px; }
+</style></head><body>
+
+<h1>Maker incentive scan</h1>
+<p class="sub">$${capitalUsd} capital · ${(marginUse * 100).toFixed(0)}% as margin · edge ${edgeRatio} · PENDLE $${pendleUsd.toFixed(3)} · ${plans.length} markets with a live budget</p>
+
+<div class="hero">
+  <div><div class="big">${esc(best.symbol)}</div></div>
+  <div><span class="big">${money(best.usdPerDay)}</span><span class="unit">/day</span></div>
+  <div><span class="big">${pct(best.aprOnCapital)}</span><span class="unit">APR on capital</span></div>
+  <div class="kv">${(best.rewardPerHour * 24).toFixed(2)} PENDLE/day · <b>${best.daysToMaturity.toFixed(0)}d</b> to maturity · ${money(best.usdToMaturity)} total</div>
+</div>
+
+<h2>Per day, at today's pool</h2>
+${rankRows}
+
+<h2>Total before maturity</h2>
+<p class="sub">The budget stops at expiry, so a higher daily rate does not always win.</p>
+${totalRows}
+
+<h2>${esc(best.symbol)} — your share of each side</h2>
+<p class="sub">Reward share is size ÷ (pool + size); the band is not distance-weighted.</p>
+${shareRows}
+
+<h2>Why</h2>
+<ul>${why.map(w => `<li>${esc(w.replace(/^•\s*/, ''))}</li>`).join('')}</ul>
+
+<h2>Strategy parameters</h2>
+<pre>${esc(paramsBlock.join('\n'))}</pre>
+
+<h2>All markets</h2>
+<div class="wrap"><table>
+  <thead><tr><th class="n">#</th><th>Market</th><th class="n">PENDLE/d</th><th class="n">$/d</th><th class="n">APR</th><th class="n">$ to expiry</th><th class="n">Left</th><th class="n">Band</th><th>Sides (size/pool share)</th></tr></thead>
+  <tbody>${tableRows}</tbody>
+</table></div>
+
+<p class="note">The pool is what rests in band right now — others can join and dilute you. Budgets are per epoch and can change. Margin per YU came from the venue's own simulation at the band edge.</p>
+</body></html>`
+}
+
 export const scanIncentivesScript: ScriptDefinition = {
   id: 'scan-incentives',
   name: 'Scan maker incentives',
@@ -230,6 +403,11 @@ export const scanIncentivesScript: ScriptDefinition = {
       '',
       'Caveats: the pool is what rests in band RIGHT NOW — others can join and dilute you; the budget is per epoch and can change; reward share is not distance-weighted, so the edge is as good as the touch. Margin per YU was read from the venue\'s own simulation at the band edge.',
     ].join('\n')
-    return { text, json: { capitalUsd, sides: wantSides, marginUse, edgeRatio, pendleUsd, best: best.symbol, plans } }
+    const html = renderReport({ plans, capitalUsd, wantSides, marginUse, edgeRatio, pendleUsd, paramsBlock, why })
+    return {
+      text,
+      json: { capitalUsd, sides: wantSides, marginUse, edgeRatio, pendleUsd, best: best.symbol, plans },
+      files: [{ name: `boros-scan-${best.symbol.replace(/[^\w.-]/g, '-')}.html`, mime: 'text/html', content: html }],
+    }
   },
 }
