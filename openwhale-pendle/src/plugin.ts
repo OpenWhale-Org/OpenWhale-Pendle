@@ -4,6 +4,7 @@ import { borosAgentCredentialType } from './credentialType.js'
 import { PendleMarketSession, PendleMarketAccount } from './market.js'
 import { PENDLE_LOGO } from './brand.js'
 import { BorosSession } from './session.js'
+import { BorosTradingExecutor } from './executor/BorosTradingExecutor.js'
 import { BorosRatesAccount } from './account.js'
 import { setupAgentScript, scanIncentivesScript } from './scripts.js'
 
@@ -41,7 +42,19 @@ export const pendlePlugin: PluginFactory = (ctx) => ({
     '- **Set up Boros agent** — the onboarding above; re-running it re-derives the same agent (recoverable).',
   ].join('\n'),
   monitors: [],
-  executors: [],
+  executors: [{
+    definition: {
+      id: 'boros-trading',
+      name: 'Boros trading',
+      description: 'Take or close a Boros position at a rate no worse than the touch ± slippage (IOC, simulated first). The venue-level counterpart to the maker executor.',
+      source: 'plugin',
+      pluginName: 'pendle',
+      supportedActions: ['open', 'simulateOpen', 'close', 'simulateClose', 'cancelAll'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    instance: new BorosTradingExecutor(),
+  }],
   strategies: [],
   credentialTypes: [borosAgentCredentialType],
   adapters: [

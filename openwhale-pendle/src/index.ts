@@ -1,6 +1,8 @@
 export { BorosSession } from './session.js'
 export type { BorosSessionOptions, BorosMarketSummary, MakerCampaign, MakerCampaignSide, BorosSide, BorosMarginMode, BorosMarketQuote, BorosBook, BorosBookLevel, BorosOpenOrder, BorosPosition, BorosAccountInfo, BorosBatchResult } from './session.js'
 export { BorosRatesAccount } from './account.js'
+export { BorosTradingExecutor } from './executor/BorosTradingExecutor.js'
+export type { BorosTradingInstruction } from './executor/BorosTradingExecutor.js'
 export { PendleMarketSession, PendleMarketAccount } from './market.js'
 export type { PendleValuation } from './market.js'
 export { borosAgentCredentialType } from './credentialType.js'
