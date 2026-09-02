@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { BaseStrategy, createLogger } from '@openwhaleorg/core'
-import type { ExecutionInstruction, StrategyContext, StrategyParams, Trigger, StrategyDeclarations, MonitorSource } from '@openwhaleorg/core'
-import { BorosRatesAccount } from '@openwhaleorg/pendle'
+import type { ExecutionInstruction, ParamPreset, PresetContext, StrategyContext, StrategyParams, Trigger, StrategyDeclarations, MonitorSource } from '@openwhaleorg/core'
+import { BorosRatesAccount, scanMakerIncentives } from '@openwhaleorg/pendle'
+import type { MarketPlan } from '@openwhaleorg/pendle'
 import type { BorosSide, BorosMarginMode } from '@openwhaleorg/pendle'
 import type { MarketWatchSample } from '../monitor/MarketWatchMonitor.js'
 import { judgeSide } from './corridor.js'
@@ -97,6 +98,22 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   override readonly executors = decls.executors
   override readonly accounts = decls.accounts
   readonly paramsIllustrations = makerIllustrations
+
+  override readonly presetSource = {
+    title: 'Maker-incentive markets',
+    description: 'Every Boros market with a live maker budget, ranked by what $1,000 of collateral would earn resting at the band edge — the venue\'s own margin requirement and its payout ceiling included. Each card sets the market and a size that fits.',
+    ttlMs: 120_000,
+  }
+
+  /**
+   * The scan-incentives Script, as cards. Sized to $1,000 (the Script's
+   * default) unless the form already holds a fixed size, in which case that
+   * size is what the card proposes to keep.
+   */
+  override async presets(ctx: PresetContext): Promise<ParamPreset[]> {
+    const scan = await scanMakerIncentives({ capitalUsd: 1_000, sides: 'both', marginUse: 0.8, edgeRatio: 0.95, ...(ctx.signal ? { signal: ctx.signal } : {}) })
+    return scan.plans.map(plan => makerPreset(plan, scan.pendleUsd))
+  }
 
   readonly baseParamsSchema = z.object({
     market: z.string().min(3).meta({
@@ -482,5 +499,37 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     out.push(this.instruction('maker', act('requote'), { marketId, tokenId, marginMode: mode, orders, cancelSides, protectOrderIds }, ['boros']))
     await this.store.set(STATE_KEY, state)
     return out
+  }
+}
+
+const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`
+
+/** One scanned market as a preset: the market, a size both sides fit, and the figures the ranking was made from. */
+export function makerPreset(plan: MarketPlan, pendleUsd: number): ParamPreset {
+  const sizeYu = Math.min(...plan.sides.map(s => s.sizeYu))
+  const badges: Array<{ text: string; tone?: 'positive' | 'negative' | 'neutral' | 'muted' }> = []
+  if (plan.capped) badges.push({ text: 'at ceiling', tone: 'muted' })
+  if (plan.capUnknown) badges.push({ text: 'no ceiling published', tone: 'negative' })
+  if (plan.isolatedOnly) badges.push({ text: 'isolated', tone: 'muted' })
+  if (plan.daysToMaturity < 7) badges.push({ text: `${plan.daysToMaturity.toFixed(0)}d left`, tone: 'negative' })
+  return {
+    id: plan.symbol,
+    label: `${plan.symbol} · ${pct(plan.aprOnCapital)} on $1k`,
+    description: `${(plan.rewardPerHour * 24).toFixed(2)} PENDLE/day ≈ $${plan.usdPerDay.toFixed(2)} at PENDLE $${pendleUsd.toFixed(3)}; ${sizeYu} YU per side.`,
+    base: { market: plan.symbol, marginMode: 'auto' },
+    tunable: { sizeMode: 'fixed', sizeYu },
+    card: {
+      title: plan.symbol,
+      subtitle: `${plan.collateral} · mid ${pct(plan.midApr, 2)} · ±${pct(plan.sides[0]?.range ?? 0, 2)}`,
+      headline: { label: 'APR on $1k', value: pct(plan.aprOnCapital), tone: plan.capUnknown ? 'muted' : 'positive' },
+      rows: [
+        { label: 'PENDLE / day', value: `${(plan.rewardPerHour * 24).toFixed(2)} ≈ $${plan.usdPerDay.toFixed(2)}` },
+        { label: 'size per side', value: `${sizeYu} YU` },
+        { label: 'pool in band', value: plan.sides.map(s => `${s.side === 'long' ? 'L' : 'S'} ${s.poolYu.toFixed(0)}`).join(' · ') },
+        { label: 'matures', value: `${plan.daysToMaturity.toFixed(0)}d` },
+      ],
+      badges,
+      group: plan.daysToMaturity >= 14 ? 'Two weeks or more' : 'Maturing soon',
+    },
   }
 }

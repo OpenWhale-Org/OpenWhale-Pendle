@@ -96,7 +96,7 @@ interface SideCampaign {
   /** Ceiling on what this side may pay out per hour, at the pool now in band. */
   currentCappedDistributionPerHour?: number | null
 }
-interface SidePlan {
+export interface SidePlan {
   side: 'long' | 'short'
   budgetPerHour: number
   poolYu: number
@@ -111,7 +111,7 @@ interface SidePlan {
   uncappedRewardPerHour: number
   rewardPerHour: number
 }
-interface MarketPlan {
+export interface MarketPlan {
   marketId: number
   symbol: string
   collateral: string
@@ -285,21 +285,30 @@ export function renderReport(input: {
   })
 }
 
-export const scanIncentivesScript: ScriptDefinition = {
-  id: 'scan-incentives',
-  name: 'Scan maker incentives',
-  description: 'Rank Boros markets with a live maker-incentive budget by what a given capital would earn resting at the band edge, and spell out the best pick with its strategy parameters.',
-  paramsSchema: z.object({
-    capitalUsd: z.coerce.number().positive().default(1000).meta({ displayName: 'Capital (USD)', description: 'Collateral you would deposit into the chosen market. Sized into orders through the venue\'s own margin requirement.' }),
-    sides: z.enum(['both', 'long', 'short']).default('both').meta({ displayName: 'Sides', description: 'both splits the capital across the two sides (each needs its own margin); a single side puts it all on one.' }),
-    marginUse: z.coerce.number().min(0.1).max(1).default(0.8).meta({ displayName: 'Margin use', description: 'Fraction of the capital committed as order margin; the rest stays as buffer against a fill and rate moves.' }),
-    edgeRatio: z.coerce.number().min(0.5).max(1).default(0.95).meta({ displayName: 'Edge ratio', description: 'Where the order rests as a fraction of the band half-width — mirror the strategy\'s value.' }),
-  }),
-  run: async ({ params, emit, signal }) => {
-    const capitalUsd = Number(params['capitalUsd'] ?? 1000)
-    const wantSides = String(params['sides'] ?? 'both') as 'both' | 'long' | 'short'
-    const marginUse = Number(params['marginUse'] ?? 0.8)
-    const edgeRatio = Number(params['edgeRatio'] ?? 0.95)
+/** Inputs of the maker-incentive scan — the Script's params, and what a preset dialog sends. */
+export interface MakerScanInput {
+  capitalUsd: number
+  sides: 'both' | 'long' | 'short'
+  marginUse: number
+  edgeRatio: number
+  emit?: ((line: string) => void) | undefined
+  signal?: AbortSignal | undefined
+}
+
+export interface MakerScan {
+  /** Ranked by USD per day, best first. */
+  plans: MarketPlan[]
+  pendleUsd: number
+  /** Live markets considered. */
+  markets: number
+}
+
+/**
+ * The scan itself, apart from the report: one function so the Script and
+ * the maker strategy's presets rank the same markets the same way.
+ */
+export async function scanMakerIncentives(input: MakerScanInput): Promise<MakerScan> {
+  const { capitalUsd, sides: wantSides, marginUse, edgeRatio, emit, signal } = input
     const api = getOpenApiSdk()
 
     const assets = ((await api.assets.assetsControllerListAssets({})).data as { results?: Array<{ tokenId: number; symbol: string; usdPrice: string }> }).results ?? []
@@ -421,6 +430,25 @@ export const scanIncentivesScript: ScriptDefinition = {
       }
     }
     plans.sort((a, b) => b.usdPerDay - a.usdPerDay)
+  return { plans, pendleUsd, markets: markets.length }
+}
+
+export const scanIncentivesScript: ScriptDefinition = {
+  id: 'scan-incentives',
+  name: 'Scan maker incentives',
+  description: 'Rank Boros markets with a live maker-incentive budget by what a given capital would earn resting at the band edge, and spell out the best pick with its strategy parameters.',
+  paramsSchema: z.object({
+    capitalUsd: z.coerce.number().positive().default(1000).meta({ displayName: 'Capital (USD)', description: 'Collateral you would deposit into the chosen market. Sized into orders through the venue\'s own margin requirement.' }),
+    sides: z.enum(['both', 'long', 'short']).default('both').meta({ displayName: 'Sides', description: 'both splits the capital across the two sides (each needs its own margin); a single side puts it all on one.' }),
+    marginUse: z.coerce.number().min(0.1).max(1).default(0.8).meta({ displayName: 'Margin use', description: 'Fraction of the capital committed as order margin; the rest stays as buffer against a fill and rate moves.' }),
+    edgeRatio: z.coerce.number().min(0.5).max(1).default(0.95).meta({ displayName: 'Edge ratio', description: 'Where the order rests as a fraction of the band half-width — mirror the strategy\'s value.' }),
+  }),
+  run: async ({ params, emit, signal }) => {
+    const capitalUsd = Number(params['capitalUsd'] ?? 1000)
+    const wantSides = String(params['sides'] ?? 'both') as 'both' | 'long' | 'short'
+    const marginUse = Number(params['marginUse'] ?? 0.8)
+    const edgeRatio = Number(params['edgeRatio'] ?? 0.95)
+    const { plans, pendleUsd } = await scanMakerIncentives({ capitalUsd, sides: wantSides, marginUse, edgeRatio, emit, signal })
     if (plans.length === 0) return { text: 'No live maker-incentive budgets right now.', json: [] }
 
     const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`

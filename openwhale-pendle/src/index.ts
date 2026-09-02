@@ -24,3 +24,5 @@ declare module '@openwhaleorg/core' {
 // Plugin-package convention: the entry default-exports the plugin factory
 // so runtime.loadPluginFromPath (dashboard install) can load it.
 export { default } from './plugin.js'
+export { scanMakerIncentives } from './scripts.js'
+export type { MakerScanInput, MakerScan, MarketPlan, SidePlan } from './scripts.js'
