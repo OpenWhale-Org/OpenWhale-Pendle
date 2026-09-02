@@ -58,6 +58,10 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
         contract: 'market-watch',
         displayName: 'Boros market watch',
         description: 'One Boros market\'s maker picture every few seconds: mid/mark APR, the incentive band and budget per side, the pool we share it with, and the size already resting in band. Key: market id.',
+        // Every key of this monitor is a Boros market, and the key has no venue
+        // field for the dashboard to read — declaring the pin is what lets its
+        // market picker list anything instead of asking for a typed symbol.
+        venue: 'boros',
         params: marketWatchParamsSchema,
         create: (ctx) => new MarketWatchMonitor(ctx),
       },
