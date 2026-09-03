@@ -62,6 +62,16 @@ export interface BorosMarketQuote {
   lastTradedApr: number
   nextSettlementTime: number
   timeToMaturity: number
+  /**
+   * The market's own terms, when the venue publishes them with the quote —
+   * what an estimate of margin and fees has to use to match the protocol:
+   * initial margin = |notional| × max(|rate|, marginRateFloor) × max(term, marginTimeFloorSeconds) × initialMarginFactor.
+   */
+  takerFeeRate?: number
+  settleFeeRate?: number
+  initialMarginFactor?: number
+  marginRateFloor?: number
+  marginTimeFloorSeconds?: number
 }
 
 export interface BorosBookLevel { apr: number; sizeYu: number }
@@ -239,11 +249,29 @@ export class BorosSession {
   /** Live mid/mark/best APRs for one market (keyless — the public markets endpoint). */
   async marketQuote(marketId: number): Promise<BorosMarketQuote> {
     const res = (await this.api.markets.marketsControllerGetMarketsByIds({ marketIds: String(marketId) })).data as unknown as {
-      results?: Array<{ marketId: number; data?: Record<string, number> }>
+      results?: Array<{
+        marketId: number
+        data?: Record<string, number>
+        config?: { takerFee?: string; kIM?: string; tThresh?: number }
+        extConfig?: { settleFeeRate?: string }
+        imData?: { marginFloor?: number }
+      }>
     }
     const m = (res.results ?? []).find(r => r.marketId === marketId)
     if (!m?.data) throw new Error(`Boros market ${marketId} not found`)
     const d = m.data
+    const x18 = (v: string | undefined): number | undefined => {
+      if (v === undefined) return undefined
+      const n = Number(v)
+      return Number.isFinite(n) ? n / 1e18 : undefined
+    }
+    const terms = {
+      takerFeeRate: x18(m.config?.takerFee),
+      settleFeeRate: x18(m.extConfig?.settleFeeRate),
+      initialMarginFactor: x18(m.config?.kIM),
+      marginRateFloor: m.imData?.marginFloor,
+      marginTimeFloorSeconds: m.config?.tThresh,
+    }
     return {
       marketId,
       midApr: d['midApr'] ?? d['markApr'] ?? 0,
@@ -253,6 +281,7 @@ export class BorosSession {
       lastTradedApr: d['lastTradedApr'] ?? 0,
       nextSettlementTime: d['nextSettlementTime'] ?? 0,
       timeToMaturity: d['timeToMaturity'] ?? 0,
+      ...Object.fromEntries(Object.entries(terms).filter(([, v]) => v !== undefined)),
     }
   }
 

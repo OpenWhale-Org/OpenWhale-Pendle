@@ -35,7 +35,7 @@
   },
   "peerDependencies": {
     "@openwhaleorg/core": "^0.2.3",
-    "@openwhaleorg/pendle": "^0.1.12"
+    "@openwhaleorg/pendle": "^0.1.13"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
