@@ -121,10 +121,6 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       description: 'One instance quotes one market. Pick from the venue\'s live markets; run pendle/scan-incentives to see which have a budget and a small pool.',
       catalogue: { source: 'market', kind: 'pendle/rates' },
     }),
-    dryRun: z.boolean().default(true).meta({
-      displayName: 'Dry run',
-      description: 'Follows the band and logs every cancel/place it would send, without sending. Switch off explicitly to go live.',
-    }),
     marginMode: z.enum(['auto', 'cross', 'isolated']).default('auto').meta({
       displayName: 'Margin mode',
       description: 'Which margin account the orders live in. auto = isolated when the venue marks the market isolated-only, else cross. The baseline snapshot and all reads/cancels are scoped to this account.',
@@ -255,10 +251,11 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     }
   }
 
-  private async evaluateInner(_context: StrategyContext): Promise<ExecutionInstruction[]> {
-    const { market, dryRun, baselineSnapshot, marginMode: modeParam } = this.baseParamsSchema.parse(this.params.base)
+  private async evaluateInner(context: StrategyContext): Promise<ExecutionInstruction[]> {
+    const { market, baselineSnapshot, marginMode: modeParam } = this.baseParamsSchema.parse(this.params.base)
     const t = this.tunableParamsSchema.parse(this.params.tunable)
-    const act = (action: string) => (dryRun ? `simulate${action.charAt(0).toUpperCase()}${action.slice(1)}` : action)
+    // Dry run is the instance's option: the engine records what this returns without sending it.
+    const act = (action: string) => action
 
     const record = await this.monitorData('watch')?.readLatest(market)
     const sample = record?.data as unknown as MarketWatchSample | undefined
@@ -465,7 +462,8 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
       const band = sample.band[side]
       if (band.range <= 0 || band.budgetPerHour <= 0) continue   // nothing to farm on this side right now
       const mine = resting.filter(o => o.side === side)
-      const restingApr = mine[0]?.apr ?? (dryRun ? state[side]?.apr : undefined)
+      // Under the framework's dry run nothing rests on the venue; the quote this would have rested is remembered instead.
+      const restingApr = mine[0]?.apr ?? (context.dryRun ? state[side]?.apr : undefined)
       const verdict = judgeSide({ side, mid: sample.midApr, range: band.range, restingApr, params: t })
       const sizeYu = await targetSizeFor(side, verdict.targetApr)
       if (sizeYu === undefined) continue   // capacity unknown or spent — leave what is resting alone

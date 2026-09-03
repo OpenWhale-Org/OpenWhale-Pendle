@@ -57,7 +57,7 @@ At steady state the strategy holds at most one order per side: **two orders in `
 1. Create a **Boros Agent** credential in the pendle plugin (root address + agent key + sub-account id) and a `pendle/rates` account on it.
 2. Deposit collateral into the market you want to quote and top up the account's **gas balance** (Boros UI → Gas). Deposits are never automated.
 3. Run the pendle plugin's **Scan maker incentives** script to find a market with a live budget and a small pool.
-4. Create a strategy instance, pick the market, leave **Dry run** on, watch the logs, then switch it off.
+4. Create a strategy instance, pick the market, leave the instance's **Dry run** on, watch the logs, then switch it off.
 
 ### Strategy parameters
 
@@ -66,7 +66,6 @@ At steady state the strategy holds at most one order per side: **two orders in `
 | Param | Default | Meaning |
 |---|---|---|
 | `market` | — | The Boros market this instance quotes (picked from the venue catalogue). One instance = one market. |
-| `dryRun` | `true` | Follow the band and log every cancel/place that *would* be sent, without sending. Switch off explicitly to go live. |
 | `marginMode` | `auto` | Which margin account the orders live in. `auto` = isolated when the venue marks the market isolated-only, else cross. Reads, cancels and the baseline snapshot are scoped to this account. |
 | `baselineSnapshot` | `true` | Record the position and resting orders the account already holds at activation and never touch them. Best effort — a manual trade *after* activation looks like a fill and gets flattened. Off = everything on the market is treated as the strategy's own. |
 

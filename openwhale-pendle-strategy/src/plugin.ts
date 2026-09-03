@@ -29,7 +29,7 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
       '- Have a **Boros Account** (see the pendle plugin\'s setup) with collateral deposited into the market you pick and a USD gas balance.',
       '- Run **Scan maker incentives** and pick a market with a live budget and a small pool.',
       '- Create a **market-watch** monitor instance keyed by that market id (or let the strategy subscribe to it).',
-      '- Create one strategy instance per market. It starts in **dry run** — it logs every cancel/place it would send. Switch dryRun off to go live.',
+      '- Create one strategy instance per market. Leave the instance\'s **Dry run** option on first — the engine records every cancel/place the strategy would send without sending it. Switch it off to go live.',
       '',
       '## Size',
       'Fixed YU, or a **percentage of what the margin can currently open** — recomputed every tick, so the size follows the balance instead of a number typed once. Capacity is the account\'s equity divided by the margin the venue asks per YU, minus whatever the baseline occupies; the percentage applies to each side rather than being split between them. Equity rather than free margin, because free margin nets out our own resting orders and sizing against it shrinks the target every time it is met.',
