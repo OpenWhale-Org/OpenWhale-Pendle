@@ -162,6 +162,46 @@ async function withVenueError<T>(fn: () => Promise<T>): Promise<T> {
  * account's on-chain USD gas balance) — the root wallet's private key never
  * enters this class. Keyless sessions carry only the public Open API surface.
  */
+/** Markets per quote request; the endpoint takes a list. */
+const QUOTE_BATCH = 20
+/** How long a market quote is served without asking the venue again. */
+const QUOTE_TTL_MS = 3_000
+
+interface RawMarketRow {
+  marketId: number
+  data?: Record<string, number>
+  config?: { takerFee?: string; kIM?: string; tThresh?: number }
+  extConfig?: { settleFeeRate?: string }
+  imData?: { marginFloor?: number }
+}
+
+function toQuote(m: RawMarketRow): BorosMarketQuote {
+  const d = m.data ?? {}
+  const x18 = (v: string | undefined): number | undefined => {
+    if (v === undefined) return undefined
+    const n = Number(v)
+    return Number.isFinite(n) ? n / 1e18 : undefined
+  }
+  const terms = {
+    takerFeeRate: x18(m.config?.takerFee),
+    settleFeeRate: x18(m.extConfig?.settleFeeRate),
+    initialMarginFactor: x18(m.config?.kIM),
+    marginRateFloor: m.imData?.marginFloor,
+    marginTimeFloorSeconds: m.config?.tThresh,
+  }
+  return {
+    marketId: m.marketId,
+    midApr: d['midApr'] ?? d['markApr'] ?? 0,
+    markApr: d['markApr'] ?? 0,
+    ...(d['bestBid'] !== undefined ? { bestBid: d['bestBid'] } : {}),
+    ...(d['bestAsk'] !== undefined ? { bestAsk: d['bestAsk'] } : {}),
+    lastTradedApr: d['lastTradedApr'] ?? 0,
+    nextSettlementTime: d['nextSettlementTime'] ?? 0,
+    timeToMaturity: d['timeToMaturity'] ?? 0,
+    ...Object.fromEntries(Object.entries(terms).filter(([, v]) => v !== undefined)),
+  }
+}
+
 export class BorosSession {
   readonly api = getOpenApiSdk()
   readonly exchange?: Exchange
@@ -247,41 +287,59 @@ export class BorosSession {
   }
 
   /** Live mid/mark/best APRs for one market (keyless — the public markets endpoint). */
+  /**
+   * Quotes for many markets in one request — the endpoint takes a list, and
+   * a scan that asked one market at a time was what drew the venue's 429.
+   * Each answer also lands in the short quote cache below.
+   */
+  async marketQuotes(marketIds: readonly number[]): Promise<Map<number, BorosMarketQuote>> {
+    const out = new Map<number, BorosMarketQuote>()
+    const wanted = [...new Set(marketIds)]
+    for (let i = 0; i < wanted.length; i += QUOTE_BATCH) {
+      const ids = wanted.slice(i, i + QUOTE_BATCH)
+      const res = await this.withRateLimitMessage(() => this.api.markets.marketsControllerGetMarketsByIds({ marketIds: ids.join(',') })) as unknown as { data?: { results?: RawMarketRow[] } }
+      for (const m of res.data?.results ?? []) {
+        if (!m.data) continue
+        const quote = toQuote(m)
+        out.set(m.marketId, quote)
+        this.quoteCache.set(m.marketId, { at: Date.now(), promise: Promise.resolve(quote) })
+      }
+    }
+    return out
+  }
+
+  /**
+   * One market's quote, served from the last few seconds when there is one.
+   *
+   * The pictures under a form ask on every keystroke and a scan asks for
+   * every market; the venue rate-limits well below that. Three seconds is
+   * shorter than any monitor's poll and long enough to fold a burst of asks
+   * into one request — and two asks in flight share the one promise.
+   */
   async marketQuote(marketId: number): Promise<BorosMarketQuote> {
-    const res = (await this.api.markets.marketsControllerGetMarketsByIds({ marketIds: String(marketId) })).data as unknown as {
-      results?: Array<{
-        marketId: number
-        data?: Record<string, number>
-        config?: { takerFee?: string; kIM?: string; tThresh?: number }
-        extConfig?: { settleFeeRate?: string }
-        imData?: { marginFloor?: number }
-      }>
-    }
-    const m = (res.results ?? []).find(r => r.marketId === marketId)
-    if (!m?.data) throw new Error(`Boros market ${marketId} not found`)
-    const d = m.data
-    const x18 = (v: string | undefined): number | undefined => {
-      if (v === undefined) return undefined
-      const n = Number(v)
-      return Number.isFinite(n) ? n / 1e18 : undefined
-    }
-    const terms = {
-      takerFeeRate: x18(m.config?.takerFee),
-      settleFeeRate: x18(m.extConfig?.settleFeeRate),
-      initialMarginFactor: x18(m.config?.kIM),
-      marginRateFloor: m.imData?.marginFloor,
-      marginTimeFloorSeconds: m.config?.tThresh,
-    }
-    return {
-      marketId,
-      midApr: d['midApr'] ?? d['markApr'] ?? 0,
-      markApr: d['markApr'] ?? 0,
-      ...(d['bestBid'] !== undefined ? { bestBid: d['bestBid'] } : {}),
-      ...(d['bestAsk'] !== undefined ? { bestAsk: d['bestAsk'] } : {}),
-      lastTradedApr: d['lastTradedApr'] ?? 0,
-      nextSettlementTime: d['nextSettlementTime'] ?? 0,
-      timeToMaturity: d['timeToMaturity'] ?? 0,
-      ...Object.fromEntries(Object.entries(terms).filter(([, v]) => v !== undefined)),
+    const hit = this.quoteCache.get(marketId)
+    if (hit && Date.now() - hit.at < QUOTE_TTL_MS) return hit.promise
+    const promise = (async () => {
+      const res = (await this.withRateLimitMessage(() => this.api.markets.marketsControllerGetMarketsByIds({ marketIds: String(marketId) }))).data as unknown as { results?: RawMarketRow[] }
+      const m = (res.results ?? []).find(r => r.marketId === marketId)
+      if (!m?.data) throw new Error(`Boros market ${marketId} not found`)
+      return toQuote(m)
+    })()
+    this.quoteCache.set(marketId, { at: Date.now(), promise })
+    promise.catch(() => { if (this.quoteCache.get(marketId)?.promise === promise) this.quoteCache.delete(marketId) })
+    return promise
+  }
+
+  private readonly quoteCache = new Map<number, { at: number; promise: Promise<BorosMarketQuote> }>()
+
+  /** The SDK throws axios's "Request failed with status code 429"; say whose limit it was. */
+  private async withRateLimitMessage<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call()
+    } catch (err) {
+      const status = (err as { response?: { status?: number } } | undefined)?.response?.status
+      if (status === 429) throw new Error('Boros API rate limit (429) — the venue asked for a pause; retrying in a moment')
+      throw err
     }
   }
 
