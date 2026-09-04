@@ -80,3 +80,49 @@ describe('boros-trading', () => {
     expect(flat?.status).toBe('skipped')
   })
 })
+
+describe('boros-trading — resting', () => {
+  function makerBoros() {
+    const book: Array<{ orderId: string; side: string; apr: number; sizeYu: number; unfilledYu: number; marketId: number; isCross: boolean }> = [
+      { orderId: 'old-1', side: 'long', apr: 0.058, sizeYu: 1, unfilledYu: 1, marketId: 11, isCross: true },
+    ]
+    const calls: Array<Record<string, unknown>> = []
+    return {
+      calls,
+      ensureEntered: async () => {},
+      restingOrders: async () => book.map(o => ({ ...o })),
+      placeMakerOrder: async (args: Record<string, unknown>) => {
+        calls.push(args)
+        if ((args['apr'] as number) >= 0.06) return { txHash: '0xrefused' }   // crossing: the venue rejects a post-only
+        book.push({ orderId: 'new-7', side: String(args['side']), apr: args['apr'] as number, sizeYu: args['sizeYu'] as number, unfilledYu: args['sizeYu'] as number, marketId: 11, isCross: true })
+        return { txHash: '0xrested' }
+      },
+      cancelOrders: async (_m: number, _t: number, ids: string[]) => { calls.push({ cancel: ids }); for (const id of ids) { const i = book.findIndex(o => o.orderId === id); if (i >= 0) book.splice(i, 1) } },
+    }
+  }
+
+  it('rests a post-only and reads its id back from the book', async () => {
+    const boros = makerBoros()
+    const fire = harness(boros)
+    const result = await fire('rest', { marketId: 11, tokenId: 1, side: 'long', sizeYu: 0.1, apr: 0.059 })
+    expect(result!.status).toBe('success')
+    expect(result!.data).toMatchObject({ orderId: 'new-7', apr: 0.059, order: { orderId: 'new-7', symbol: 'boros:11' } })
+    expect(boros.calls[0]).toMatchObject({ side: 'long', sizeYu: 0.1, apr: 0.059 })
+  })
+
+  it('a post-only the venue refused is a failure that names it, not a phantom order', async () => {
+    const fire = harness(makerBoros())
+    const result = await fire('rest', { marketId: 11, tokenId: 1, side: 'long', sizeYu: 0.1, apr: 0.061 })
+    expect(result!.status).toBe('failed')
+    expect(result!.error).toMatch(/did not rest/)
+  })
+
+  it('cancels by id', async () => {
+    const boros = makerBoros()
+    const fire = harness(boros)
+    const result = await fire('cancel', { marketId: 11, tokenId: 1, orderIds: ['old-1'] })
+    expect(result!.status).toBe('success')
+    expect(boros.calls.at(-1)).toEqual({ cancel: ['old-1'] })
+    expect(await boros.restingOrders()).toEqual([])
+  })
+})

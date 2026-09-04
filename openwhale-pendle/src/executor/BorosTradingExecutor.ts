@@ -49,6 +49,21 @@ const schemas = {
     tokenId: z.number().int().nonnegative(),
     mode: z.enum(['cross', 'isolated']).default('cross'),
   }),
+  /** Rest a post-only order at an APR; it never crosses. The order id is what the account's open orders will show. */
+  rest: z.object({
+    marketId: z.number().int().positive(),
+    tokenId: z.number().int().nonnegative(),
+    side: z.enum(['long', 'short']),
+    sizeYu: z.number().positive(),
+    apr: z.number(),
+    mode: z.enum(['cross', 'isolated']).default('cross'),
+  }),
+  cancel: z.object({
+    marketId: z.number().int().positive(),
+    tokenId: z.number().int().nonnegative(),
+    orderIds: z.array(z.string()).min(1),
+    mode: z.enum(['cross', 'isolated']).default('cross'),
+  }),
 }
 
 export type BorosTradingInstruction = ExecutionInstruction & { params: Record<string, unknown> }
@@ -65,14 +80,14 @@ export class BorosTradingExecutor extends BaseExecutor<BorosTradingInstruction> 
   }
 
   get executorName(): string { return 'boros-trading' }
-  get supportedActions(): string[] { return ['open', 'simulateOpen', 'close', 'simulateClose', 'cancelAll'] }
+  get supportedActions(): string[] { return ['open', 'simulateOpen', 'close', 'simulateClose', 'rest', 'simulateRest', 'cancel', 'cancelAll'] }
 
   override get credentials(): readonly ExecutorCredentialSlot[] {
     return [{ label: 'boros', kind: 'pendle/rates' }]
   }
 
   override get actionSchemas() {
-    return { open: schemas.open, simulateOpen: schemas.open, close: schemas.close, simulateClose: schemas.close, cancelAll: schemas.cancelAll }
+    return { open: schemas.open, simulateOpen: schemas.open, close: schemas.close, simulateClose: schemas.close, rest: schemas.rest, simulateRest: schemas.rest, cancel: schemas.cancel, cancelAll: schemas.cancelAll }
   }
 
   async execute(instruction: BorosTradingInstruction): Promise<ExecutionResult<BorosTradingInstruction>> {
@@ -83,6 +98,12 @@ export class BorosTradingExecutor extends BaseExecutor<BorosTradingInstruction> 
       switch (action) {
         case 'open': return await this.open(instruction, boros, schemas.open.parse(instruction.params), simulate)
         case 'close': return await this.close(instruction, boros, schemas.close.parse(instruction.params), simulate)
+        case 'rest': return await this.rest(instruction, boros, schemas.rest.parse(instruction.params), simulate)
+        case 'cancel': {
+          const p = schemas.cancel.parse(instruction.params)
+          await boros.cancelOrders(p.marketId, p.tokenId, p.orderIds, p.mode)
+          return { instruction, status: 'success', data: { marketId: p.marketId, cancelled: p.orderIds }, executedAt: new Date() }
+        }
         case 'cancelAll': {
           const p = schemas.cancelAll.parse(instruction.params)
           await boros.cancelAll(p.marketId, p.tokenId, p.mode)
@@ -121,6 +142,33 @@ export class BorosTradingExecutor extends BaseExecutor<BorosTradingInstruction> 
         order: { orderId: String((receipt as { txHash?: string }).txHash ?? instruction.messageId), symbol: `boros:${p.marketId}` },
       },
       ...(filledYu > 0 ? {} : { error: 'IOC filled nothing at the limit rate' }),
+      executedAt: new Date(),
+    }
+  }
+
+  /**
+   * A maker leg: post-only at the caller's APR. The venue answers with a
+   * transaction, not an order id, so the id is read back from the book — the
+   * order of ours on that side and size that was not there a moment ago.
+   */
+  private async rest(
+    instruction: BorosTradingInstruction, boros: BorosSession, p: z.infer<typeof schemas.rest>, simulate: boolean,
+  ): Promise<ExecutionResult<BorosTradingInstruction>> {
+    if (simulate) {
+      return { instruction, status: 'success', data: { simulated: true, marketId: p.marketId, side: p.side, sizeYu: p.sizeYu, apr: p.apr }, executedAt: new Date() }
+    }
+    await boros.ensureEntered(p.marketId, p.tokenId, p.mode)
+    const before = new Set((await boros.restingOrders(p.marketId, p.tokenId, p.mode)).map(o => o.orderId))
+    const receipt = await boros.placeMakerOrder({ marketId: p.marketId, tokenId: p.tokenId, side: p.side, sizeYu: p.sizeYu, apr: p.apr, mode: p.mode })
+    const after = await boros.restingOrders(p.marketId, p.tokenId, p.mode)
+    const mine = after.find(o => !before.has(o.orderId) && o.side === p.side)
+    if (!mine) {
+      // Post-only and the rate crossed: the venue rejected it rather than filling — nothing rests.
+      return { instruction, status: 'failed', error: `Boros market ${p.marketId}: the post-only ${p.side} at ${(p.apr * 100).toFixed(3)}% did not rest (rejected as crossing, or not yet indexed)`, data: { receipt }, executedAt: new Date() }
+    }
+    return {
+      instruction, status: 'success',
+      data: { marketId: p.marketId, side: p.side, sizeYu: p.sizeYu, apr: mine.apr, orderId: mine.orderId, receipt, order: { orderId: mine.orderId, symbol: `boros:${p.marketId}` } },
       executedAt: new Date(),
     }
   }
