@@ -23,13 +23,13 @@ const log = createLogger('boros-trading')
  */
 
 const legSchema = z.object({
-  marketId: z.number().int().positive().meta({ description: 'Boros market id' }),
-  tokenId: z.number().int().nonnegative().meta({ description: 'Collateral token id of the market' }),
-  side: z.enum(['long', 'short']).meta({ description: 'long = pay fixed / receive floating; short = receive fixed / pay floating' }),
-  sizeYu: z.number().positive().meta({ description: 'Notional in YU (1 YU = 1 unit of underlying funding exposure)' }),
+  marketId: z.number().int().positive().meta({ description: 'Boros market id', i18n: { 'zh-CN': { description: 'Boros 市场 id' } } }),
+  tokenId: z.number().int().nonnegative().meta({ description: 'Collateral token id of the market', i18n: { 'zh-CN': { description: '市场的抵押品代币 id' } } }),
+  side: z.enum(['long', 'short']).meta({ description: 'long = pay fixed / receive floating; short = receive fixed / pay floating', i18n: { 'zh-CN': { description: 'long = 付固定 / 收浮动；short = 收固定 / 付浮动' } } }),
+  sizeYu: z.number().positive().meta({ description: 'Notional in YU (1 YU = 1 unit of underlying funding exposure)', i18n: { 'zh-CN': { description: '名义规模（YU，1 YU = 1 单位标的资金费敞口）' } } }),
   /** Worst acceptable rate, absolute APR; derived from the touch when omitted. */
   limitApr: z.number().optional(),
-  maxSlippageBps: z.number().min(0).default(25).meta({ description: 'Refuse when the simulated fill rate is this far from the touch' }),
+  maxSlippageBps: z.number().min(0).default(25).meta({ description: 'Refuse when the simulated fill rate is this far from the touch', i18n: { 'zh-CN': { description: '模拟成交利率偏离盘口超过此值时拒绝' } } }),
   mode: z.enum(['cross', 'isolated']).default('cross'),
 })
 

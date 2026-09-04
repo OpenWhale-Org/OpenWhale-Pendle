@@ -79,16 +79,16 @@ export class PendleMarketSession {
  * real (unlike the raw-chain wallet view, which can only price stables).
  */
 @OwAccount({
-  id: 'market-account', kind: 'pendle/market', venue: 'pendle', displayName: 'Pendle Account', logo: PENDLE_LOGO,
+  id: 'market-account', kind: 'pendle/market', venue: 'pendle', displayName: { en: 'Pendle Account', 'zh-CN': 'Pendle 账户' }, logo: PENDLE_LOGO,
   sections: [
     {
-      method: 'holdings', title: 'Holdings', kind: 'table', count: true, default: true, empty: 'No PT/YT/LP positions.',
+      method: 'holdings', title: { en: 'Holdings', 'zh-CN': '持有' }, kind: 'table', count: true, default: true, empty: 'No PT/YT/LP positions.',
       columns: [
-        { key: 'kind', label: 'Token', format: 'badge' },
-        { key: 'marketId', label: 'Market', format: 'mono', grow: true },
-        { key: 'chainId', label: 'Chain', format: 'number', digits: 0 },
-        { key: 'balance', label: 'Balance', format: 'mono', align: 'right' },
-        { key: 'usd', label: 'Value', format: 'usd', align: 'right' },
+        { key: 'kind', label: { en: 'Token', 'zh-CN': '代币' }, format: 'badge' },
+        { key: 'marketId', label: { en: 'Market', 'zh-CN': '市场' }, format: 'mono', grow: true },
+        { key: 'chainId', label: { en: 'Chain', 'zh-CN': '链' }, format: 'number', digits: 0 },
+        { key: 'balance', label: { en: 'Balance', 'zh-CN': '余额' }, format: 'mono', align: 'right' },
+        { key: 'usd', label: { en: 'Value', 'zh-CN': '价值' }, format: 'usd', align: 'right' },
       ],
     },
   ],

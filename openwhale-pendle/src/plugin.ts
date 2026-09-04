@@ -45,8 +45,8 @@ export const pendlePlugin: PluginFactory = (ctx) => ({
   executors: [{
     definition: {
       id: 'boros-trading',
-      name: 'Boros trading',
-      description: 'Take or close a Boros position at a rate no worse than the touch ± slippage (IOC, simulated first). The venue-level counterpart to the maker executor.',
+      name: { en: 'Boros trading', 'zh-CN': 'Boros 交易' },
+      description: { en: 'Take or close a Boros position at a rate no worse than the touch ± slippage (IOC, simulated first). The venue-level counterpart to the maker executor.', 'zh-CN': '以不差于盘口 ± 滑点的利率开仓或平仓（IOC，先模拟）。与做市执行器对应的交易所级执行器。' },
       source: 'plugin',
       pluginName: 'pendle',
       supportedActions: ['open', 'simulateOpen', 'close', 'simulateClose', 'cancelAll'],

@@ -100,8 +100,8 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
   readonly paramsIllustrations = makerIllustrations
 
   override readonly presetSource = {
-    title: 'Maker-incentive markets',
-    description: 'Every Boros market with a live maker budget, ranked by what $1,000 of collateral would earn resting at the band edge — the venue\'s own margin requirement and its payout ceiling included. Each card sets the market and a size that fits.',
+    title: { en: 'Maker-incentive markets', 'zh-CN': '做市激励市场' },
+    description: { en: 'Every Boros market with a live maker budget, ranked by what $1,000 of collateral would earn resting at the band edge — the venue\'s own margin requirement and its payout ceiling included. Each card sets the market and a size that fits.', 'zh-CN': '每个有做市预算的 Boros 市场，按 $1,000 抵押品挂在区间边缘能赚多少排序——已计入交易所自己的保证金要求和发放上限。每张卡片设置市场和一个合适的规模。' },
     ttlMs: 120_000,
   }
 
@@ -119,82 +119,82 @@ export class MakerStrategy extends BaseStrategy<typeof decls> {
     market: z.string().min(3).meta({
       displayName: 'Boros market',
       description: 'One instance quotes one market. Pick from the venue\'s live markets; run pendle/scan-incentives to see which have a budget and a small pool.',
-      catalogue: { source: 'market', kind: 'pendle/rates' },
+      catalogue: { source: 'market', kind: 'pendle/rates' }, i18n: { 'zh-CN': { displayName: 'Boros 市场', description: '一个实例只做一个市场。从交易所在线市场里选；运行 pendle/scan-incentives 看哪些有预算且池子小。' } }
     }),
     marginMode: z.enum(['auto', 'cross', 'isolated']).default('auto').meta({
       displayName: 'Margin mode',
-      description: 'Which margin account the orders live in. auto = isolated when the venue marks the market isolated-only, else cross. The baseline snapshot and all reads/cancels are scoped to this account.',
+      description: 'Which margin account the orders live in. auto = isolated when the venue marks the market isolated-only, else cross. The baseline snapshot and all reads/cancels are scoped to this account.', i18n: { 'zh-CN': { displayName: '保证金模式', description: '订单所在的保证金账户。auto = 交易所标记为仅逐仓时用逐仓，否则全仓。基线快照和所有读取/撤单都限定在这个账户内。' } }
     }),
     baselineSnapshot: z.boolean().default(true).meta({
       displayName: 'Baseline snapshot',
-      description: 'On every activation, record the position and resting orders the cross account already holds on this market and never touch them: only add orders on top, flatten only deviations. Best effort — the venue does not isolate the account, so a manual trade after activation looks like a fill. Recommended: run on a dedicated sub-account. Off = everything on the market is treated as the strategy\'s own.',
+      description: 'On every activation, record the position and resting orders the cross account already holds on this market and never touch them: only add orders on top, flatten only deviations. Best effort — the venue does not isolate the account, so a manual trade after activation looks like a fill. Recommended: run on a dedicated sub-account. Off = everything on the market is treated as the strategy\'s own.', i18n: { 'zh-CN': { displayName: '基线快照', description: '每次激活时记录全仓账户在该市场已有的持仓和挂单，并且绝不动它们：只在其上追加订单、只平偏差。尽力而为——交易所不隔离账户，激活后的手动交易看起来像一次成交。建议在专用子账户运行。关 = 该市场上的一切都视为策略自己的。' } }
     }),
   })
 
   readonly tunableParamsSchema = z.object({
     sizeMode: z.enum(['fixed', 'percent']).default('fixed').meta({
       section: 'Size', displayName: 'Size mode',
-      description: 'fixed = the same YU every time. percent = a share of what this account\'s margin can open right now, recomputed every tick — the size follows the balance up and down.',
+      description: 'fixed = the same YU every time. percent = a share of what this account\'s margin can open right now, recomputed every tick — the size follows the balance up and down.', i18n: { 'zh-CN': { section: '规模', displayName: '规模模式', description: 'fixed = 每次相同的 YU。percent = 该账户保证金当前可开规模的一个比例，每个 tick 重新计算——规模随余额上下浮动。' } }
     }),
     sizeYu: z.number().positive().default(10).meta({
       section: 'Size', displayName: 'Order size per side (YU)',
-      description: 'Fixed mode only. 1 YU = 1 unit of the market\'s collateral token of funding notional. Reward share = sizeYu / (pool + sizeYu) per side.',
+      description: 'Fixed mode only. 1 YU = 1 unit of the market\'s collateral token of funding notional. Reward share = sizeYu / (pool + sizeYu) per side.', i18n: { 'zh-CN': { section: '规模', displayName: '每边订单规模（YU）', description: '仅固定模式。1 YU = 1 单位该市场抵押品代币的资金费名义。奖励份额 = sizeYu / (池子 + sizeYu)，每边各算。' } }
     }),
     sizePercent: z.number().min(1).max(100).default(75).meta({
       section: 'Size', displayName: 'Size (% of margin capacity)',
-      description: 'Percent mode only. Capacity = this margin account\'s equity ÷ what the venue asks per YU at the resting rate, minus whatever the baseline already occupies. Applied PER SIDE, not split between them: on a rate market the two sides largely offset, so 75% means 75% on each.',
+      description: 'Percent mode only. Capacity = this margin account\'s equity ÷ what the venue asks per YU at the resting rate, minus whatever the baseline already occupies. Applied PER SIDE, not split between them: on a rate market the two sides largely offset, so 75% means 75% on each.', i18n: { 'zh-CN': { section: '规模', displayName: '规模（保证金容量的 %）', description: '仅百分比模式。容量 = 该保证金账户权益 ÷ 交易所在挂单利率下对每 YU 的要求，再减去基线已占用的部分；百分比按每边分别应用。' } }
     }),
     resizeTolerance: z.number().min(0.01).max(1).default(0.1).meta({
       section: 'Size', displayName: 'Resize threshold (× size)',
-      description: 'Percent mode only. Re-quote when the target size drifts this far from what is resting. Capacity moves with every mark-to-market tick, and each re-quote is a relayed transaction that costs gas — without a threshold the strategy would spend the day paying to chase noise.',
+      description: 'Percent mode only. Re-quote when the target size drifts this far from what is resting. Capacity moves with every mark-to-market tick, and each re-quote is a relayed transaction that costs gas — without a threshold the strategy would spend the day paying to chase noise.', i18n: { 'zh-CN': { section: '规模', displayName: '调整阈值（× 规模）', description: '仅百分比模式。目标规模与挂单规模偏离到这个程度时重挂。容量随每次按市值计价的 tick 变动，每次重挂都是一笔中继交易。' } }
     }),
     sides: z.enum(['both', 'long', 'short']).default('both').meta({
       section: 'Size', displayName: 'Sides',
-      description: 'both = double-sided (each side has its own budget and pool). Single-sided only if you have a view.',
+      description: 'both = double-sided (each side has its own budget and pool). Single-sided only if you have a view.', i18n: { 'zh-CN': { section: '规模', displayName: '方向', description: 'both = 双边（每边有各自的预算和池子）。只有你有方向观点时才单边。' } }
     }),
     edgeRatio: z.number().min(0.5).max(1).default(0.95).meta({
       section: 'Corridor', displayName: 'Resting distance (× half-width)',
-      description: 'Resting distance from mid as a fraction of the band half-width. 0.95 = just inside the far edge (rounding protection).',
+      description: 'Resting distance from mid as a fraction of the band half-width. 0.95 = just inside the far edge (rounding protection).', i18n: { 'zh-CN': { section: '走廊', displayName: '挂单距离（× 半宽）', description: '距中间价的挂单距离，以区间半宽的比例计。0.95 = 刚好在远端边缘内侧（防取整）。' } }
     }),
     safeDistanceRatio: z.number().min(0.05).max(0.9).default(0.3).meta({
       section: 'Corridor', displayName: 'Safe distance (× half-width)',
-      description: 'Re-quote away when mid comes closer than this fraction of the half-width — fill risk rises fast near the touch.',
+      description: 'Re-quote away when mid comes closer than this fraction of the half-width — fill risk rises fast near the touch.', i18n: { 'zh-CN': { section: '走廊', displayName: '安全距离（× 半宽）', description: '中间价靠近到半宽的这个比例以内时往外重挂——靠近盘口时成交风险上升很快。' } }
     }),
     requoteIntervalMs: z.number().int().min(5_000).default(30_000).meta({
       section: 'Corridor', displayName: 'Min re-quote interval (ms)',
-      description: 'Per side, for placing AND re-quoting. Every emission is one relayed transaction (cancel + place), and the contract read lags the relay by a few seconds — shorter than ~15s risks stacking a duplicate order.',
+      description: 'Per side, for placing AND re-quoting. Every emission is one relayed transaction (cancel + place), and the contract read lags the relay by a few seconds — shorter than ~15s risks stacking a duplicate order.', i18n: { 'zh-CN': { section: '走廊', displayName: '最短重挂间隔（毫秒）', description: '每边分别计，挂单和重挂都适用。每次发出都是一笔中继交易（撤 + 挂），合约读取比中继滞后几秒。' } }
     }),
     gasFloorUsd: z.number().min(0).default(3).meta({
       section: 'Risk', displayName: 'Gas balance floor (USD)',
-      description: 'Relayed actions are paid from the account\'s on-chain USD gas balance. Below this, quoting pauses (a dry balance fails silently).',
+      description: 'Relayed actions are paid from the account\'s on-chain USD gas balance. Below this, quoting pauses (a dry balance fails silently).', i18n: { 'zh-CN': { section: '风险', displayName: 'Gas 余额下限（USD）', description: '中继操作从账户链上 USD gas 余额扣费。低于此值暂停挂单（余额耗尽会静默失败）。' } }
     }),
     flattenSlippage: z.number().min(0).max(0.2).default(0.02).meta({
       section: 'Risk', displayName: 'Flatten slippage (× APR)',
-      description: 'The limit on the closing IOC itself — how far past the touch it may reach before giving up. Not the decision of whether to cross; that is the Fill section.',
+      description: 'The limit on the closing IOC itself — how far past the touch it may reach before giving up. Not the decision of whether to cross; that is the Fill section.', i18n: { 'zh-CN': { section: '风险', displayName: '平仓滑点（× 年化）', description: '平仓 IOC 本身的上限——越过盘口多远就放弃。不是“要不要吃单”的决定；那在“成交”一节。' } }
     }),
     fillSlippage: z.number().min(0).max(0.5).default(0.005).meta({
       section: 'Fill', displayName: 'Acceptable close slippage',
-      description: 'Cross straight away when the venue simulates the close landing within this far of the touch. Measured on the WHOLE size against the book, so it is the real cost, not the spread. 0 = always cross, whatever it costs.',
+      description: 'Cross straight away when the venue simulates the close landing within this far of the touch. Measured on the WHOLE size against the book, so it is the real cost, not the spread. 0 = always cross, whatever it costs.', i18n: { 'zh-CN': { section: '成交', displayName: '可接受的平仓滑点', description: '交易所模拟的平仓落在离盘口这么近的范围内就直接吃单。按整个规模对盘口测算，所以是真实的滑点。' } }
     }),
     fillPolicy: z.enum(['limit', 'partial', 'ladder', 'hold']).default('limit').meta({
       section: 'Fill', displayName: 'When the close is too expensive',
-      description: 'limit = rest a post-only close at the touch and wait. partial = cross only the part the book absorbs within budget, rest the remainder. ladder = cross a slice per interval, rest the remainder between slices. hold = keep the position untouched.',
+      description: 'limit = rest a post-only close at the touch and wait. partial = cross only the part the book absorbs within budget, rest the remainder. ladder = cross a slice per interval, rest the remainder between slices. hold = keep the position untouched.', i18n: { 'zh-CN': { section: '成交', displayName: '平仓太贵时', description: 'limit = 在盘口挂 post-only 平仓单等待。partial = 只吃掉盘口在预算内能吸收的部分，其余挂单。ladder = 分批吃单。' } }
     }),
     fillTimeoutMs: z.number().int().min(0).default(600_000).meta({
       section: 'Fill', displayName: 'Force-close after (ms)',
-      description: 'Once the position has been outstanding this long, cross regardless of cost. Waiting for a better price has no natural end, and an open position on a strategy that wants none is a risk that grows with time. 0 = never force.',
+      description: 'Once the position has been outstanding this long, cross regardless of cost. Waiting for a better price has no natural end, and an open position on a strategy that wants none is a risk that grows with time. 0 = never force.', i18n: { 'zh-CN': { section: '成交', displayName: '强制平仓等待（毫秒）', description: '仓位挂了这么久之后，不计成本吃单平掉。等更好的价格没有自然终点，而一个意外的仓位一直敞着。' } }
     }),
     fillStopDistance: z.number().min(0).max(1).default(0.15).meta({
       section: 'Fill', displayName: 'Synthetic stop (× entry APR)',
-      description: 'Cross regardless of cost once mid has moved this far against the position. SYNTHETIC: Boros has no stop orders, so the strategy watches and fires the IOC itself — it protects only while the engine is running, and reacts no faster than one tick. 0 = off.',
+      description: 'Cross regardless of cost once mid has moved this far against the position. SYNTHETIC: Boros has no stop orders, so the strategy watches and fires the IOC itself — it protects only while the engine is running, and reacts no faster than one tick. 0 = off.', i18n: { 'zh-CN': { section: '成交', displayName: '合成止损（× 入场年化）', description: '中间价对仓位不利地移动到这个程度时，不计成本吃单。合成的：Boros 没有止损单，由策略监视并触发。' } }
     }),
     fillSlices: z.number().int().min(2).max(20).default(4).meta({
       section: 'Fill', displayName: 'Ladder slices',
-      description: 'Ladder policy only. Each slice is its own relayed transaction with its own gas — split further than the spread you are saving and the ladder costs more than crossing once.',
+      description: 'Ladder policy only. Each slice is its own relayed transaction with its own gas — split further than the spread you are saving and the ladder costs more than crossing once.', i18n: { 'zh-CN': { section: '成交', displayName: '阶梯分批数', description: '仅阶梯策略。每一批都是一笔单独的中继交易、各付 gas——拆得比省下的价差还细，阶梯反而更贵。' } }
     }),
     fillSliceIntervalMs: z.number().int().min(5_000).default(60_000).meta({
       section: 'Fill', displayName: 'Ladder interval (ms)',
-      description: 'Ladder policy only. How long between slices.',
+      description: 'Ladder policy only. How long between slices.', i18n: { 'zh-CN': { section: '成交', displayName: '阶梯间隔（毫秒）', description: '仅阶梯策略。每批之间的间隔。' } }
     }),
   })
 
@@ -505,10 +505,10 @@ const pct = (x: number, d = 1) => `${(x * 100).toFixed(d)}%`
 /** One scanned market as a preset: the market, a size both sides fit, and the figures the ranking was made from. */
 export function makerPreset(plan: MarketPlan, pendleUsd: number): ParamPreset {
   const sizeYu = Math.min(...plan.sides.map(s => s.sizeYu))
-  const badges: Array<{ text: string; tone?: 'positive' | 'negative' | 'neutral' | 'muted' }> = []
-  if (plan.capped) badges.push({ text: 'at ceiling', tone: 'muted' })
-  if (plan.capUnknown) badges.push({ text: 'no ceiling published', tone: 'negative' })
-  if (plan.isolatedOnly) badges.push({ text: 'isolated', tone: 'muted' })
+  const badges: NonNullable<NonNullable<ParamPreset['card']>['badges']> = []
+  if (plan.capped) badges.push({ text: { en: 'at ceiling', 'zh-CN': '已到上限' }, tone: 'muted' })
+  if (plan.capUnknown) badges.push({ text: { en: 'no ceiling published', 'zh-CN': '未公布上限' }, tone: 'negative' })
+  if (plan.isolatedOnly) badges.push({ text: { en: 'isolated', 'zh-CN': '逐仓' }, tone: 'muted' })
   if (plan.daysToMaturity < 7) badges.push({ text: `${plan.daysToMaturity.toFixed(0)}d left`, tone: 'negative' })
   return {
     id: plan.symbol,
@@ -519,15 +519,15 @@ export function makerPreset(plan: MarketPlan, pendleUsd: number): ParamPreset {
     card: {
       title: plan.symbol,
       subtitle: `${plan.collateral} · mid ${pct(plan.midApr, 2)} · ±${pct(plan.sides[0]?.range ?? 0, 2)}`,
-      headline: { label: 'APR on $1k', value: pct(plan.aprOnCapital), tone: plan.capUnknown ? 'muted' : 'positive' },
+      headline: { label: { en: 'APR on $1k', 'zh-CN': '$1k 年化' }, value: pct(plan.aprOnCapital), tone: plan.capUnknown ? 'muted' : 'positive' },
       rows: [
-        { label: 'PENDLE / day', value: `${(plan.rewardPerHour * 24).toFixed(2)} ≈ $${plan.usdPerDay.toFixed(2)}` },
-        { label: 'size per side', value: `${sizeYu} YU` },
-        { label: 'pool in band', value: plan.sides.map(s => `${s.side === 'long' ? 'L' : 'S'} ${s.poolYu.toFixed(0)}`).join(' · ') },
-        { label: 'matures', value: `${plan.daysToMaturity.toFixed(0)}d` },
+        { label: { en: 'PENDLE / day', 'zh-CN': 'PENDLE / 天' }, value: `${(plan.rewardPerHour * 24).toFixed(2)} ≈ $${plan.usdPerDay.toFixed(2)}` },
+        { label: { en: 'size per side', 'zh-CN': '每边规模' }, value: `${sizeYu} YU` },
+        { label: { en: 'pool in band', 'zh-CN': '区间内池子' }, value: plan.sides.map(s => `${s.side === 'long' ? 'L' : 'S'} ${s.poolYu.toFixed(0)}`).join(' · ') },
+        { label: { en: 'matures', 'zh-CN': '到期' }, value: `${plan.daysToMaturity.toFixed(0)}d` },
       ],
       badges,
-      group: plan.daysToMaturity >= 14 ? 'Two weeks or more' : 'Maturing soon',
+      group: plan.daysToMaturity >= 14 ? { en: 'Two weeks or more', 'zh-CN': '两周以上' } : { en: 'Maturing soon', 'zh-CN': '即将到期' },
     },
   }
 }

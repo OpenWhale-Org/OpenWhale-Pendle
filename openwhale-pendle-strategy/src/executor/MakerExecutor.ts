@@ -20,37 +20,37 @@ import type { BorosSession, BorosSide, BorosBatchResult } from '@openwhaleorg/pe
  */
 
 const sideSchema = z.enum(['long', 'short'])
-const modeSchema = z.enum(['cross', 'isolated']).default('cross').meta({ description: 'Which margin account the order lives in' })
+const modeSchema = z.enum(['cross', 'isolated']).default('cross').meta({ description: 'Which margin account the order lives in', i18n: { 'zh-CN': { description: '订单所在的保证金账户' } } })
 
 const orderSchema = z.object({
   side: sideSchema,
-  sizeYu: z.number().positive().meta({ description: 'Order size in YU (collateral units of notional)' }),
-  apr: z.number().meta({ description: 'Resting implied APR, decimal (0.068 = 6.8%)' }),
-  keepInside: z.number().optional().meta({ description: 'Band edge the RESTING rate must stay inside of after tick rounding (long: ≥, short: ≤); the executor nudges the request inward until the venue agrees' }),
+  sizeYu: z.number().positive().meta({ description: 'Order size in YU (collateral units of notional)', i18n: { 'zh-CN': { description: '订单规模（YU，名义的抵押品单位）' } } }),
+  apr: z.number().meta({ description: 'Resting implied APR, decimal (0.068 = 6.8%)', i18n: { 'zh-CN': { description: '挂单隐含年化，小数（0.068 = 6.8%）' } } }),
+  keepInside: z.number().optional().meta({ description: 'Band edge the RESTING rate must stay inside of after tick rounding (long: ≥, short: ≤); the executor nudges the request inward until the venue agrees', i18n: { 'zh-CN': { description: '取整后挂单利率必须保持在其内侧的区间边缘（多头：≥，空头：≤）；执行器会向内微调直到交易所接受。' } } }),
 })
 
 export const makerActionSchemas = {
   requote: z.object({
     marketId: z.number().int(),
     tokenId: z.number().int(),
-    orders: z.array(orderSchema).default([]).meta({ description: 'One order per side to rest; whatever else rests on that side is cancelled in the same transaction' }),
-    cancelSides: z.array(sideSchema).default([]).meta({ description: 'Sides to clear without re-placing' }),
-    protectOrderIds: z.array(z.string()).default([]).meta({ description: 'Baseline orders that must never be cancelled' }),
+    orders: z.array(orderSchema).default([]).meta({ description: 'One order per side to rest; whatever else rests on that side is cancelled in the same transaction', i18n: { 'zh-CN': { description: '每边只挂一单；该方向其他挂单在同一笔交易中撤销。' } } }),
+    cancelSides: z.array(sideSchema).default([]).meta({ description: 'Sides to clear without re-placing', i18n: { 'zh-CN': { description: '只撤不挂的方向' } } }),
+    protectOrderIds: z.array(z.string()).default([]).meta({ description: 'Baseline orders that must never be cancelled', i18n: { 'zh-CN': { description: '绝不能撤的基线订单' } } }),
     marginMode: modeSchema,
   }),
   quote: z.object({
     marketId: z.number().int(),
     tokenId: z.number().int(),
     side: sideSchema,
-    sizeYu: z.number().positive().meta({ description: 'Order size in YU (collateral units of notional)' }),
-    apr: z.number().meta({ description: 'Resting implied APR, decimal (0.068 = 6.8%)' }),
-    protectOrderIds: z.array(z.string()).default([]).meta({ description: 'Baseline orders that must never be cancelled' }),
+    sizeYu: z.number().positive().meta({ description: 'Order size in YU (collateral units of notional)', i18n: { 'zh-CN': { description: '订单规模（YU，名义的抵押品单位）' } } }),
+    apr: z.number().meta({ description: 'Resting implied APR, decimal (0.068 = 6.8%)', i18n: { 'zh-CN': { description: '挂单隐含年化，小数（0.068 = 6.8%）' } } }),
+    protectOrderIds: z.array(z.string()).default([]).meta({ description: 'Baseline orders that must never be cancelled', i18n: { 'zh-CN': { description: '绝不能撤的基线订单' } } }),
     marginMode: modeSchema,
   }),
   cancel: z.object({
     marketId: z.number().int(),
     tokenId: z.number().int(),
-    side: sideSchema.optional().meta({ description: 'Absent = both sides' }),
+    side: sideSchema.optional().meta({ description: 'Absent = both sides', i18n: { 'zh-CN': { description: '缺省 = 两边' } } }),
     /** Explicit ids to cancel (an operator cleaning up); absent = every non-protected order on the side(s). */
     orderIds: z.array(z.string()).optional(),
     protectOrderIds: z.array(z.string()).default([]),
@@ -63,7 +63,7 @@ export const makerActionSchemas = {
     /** The position the account is SUPPOSED to hold (baseline). Only the deviation is flattened. */
     baselineSizeYu: z.number().default(0),
     protectOrderIds: z.array(z.string()).default([]),
-    slippage: z.number().min(0).max(0.5).default(0.02).meta({ description: 'How far past the touch the IOC order may reach, as a fraction of APR' }),
+    slippage: z.number().min(0).max(0.5).default(0.02).meta({ description: 'How far past the touch the IOC order may reach, as a fraction of APR', i18n: { 'zh-CN': { description: 'IOC 订单可以越过盘口多远，以年化的比例计' } } }),
     /**
      * 'ioc' crosses now and pays for certainty. 'limit' rests a post-only
      * order at the touch and waits, which costs nothing but may never fill —

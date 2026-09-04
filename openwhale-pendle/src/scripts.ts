@@ -22,13 +22,13 @@ function normalizeKey(key: string): `0x${string}` {
 export function setupAgentScript(credentials: CredentialStore): ScriptDefinition {
   return {
     id: 'setup-agent',
-    name: 'Set up Boros agent',
-    description: 'Generate + approve a Boros trading agent from a web3/evm root wallet, and store it as a boros/agent credential.',
+    name: { en: 'Set up Boros agent', 'zh-CN': '设置 Boros 代理' },
+    description: { en: 'Generate + approve a Boros trading agent from a web3/evm root wallet, and store it as a boros/agent credential.', 'zh-CN': '用 web3/evm 根钱包生成并批准一个 Boros 交易代理，存为 boros/agent 凭证。' },
     paramsSchema: z.object({
-      rootCredential: z.string().meta({ displayName: 'Root wallet credential (web3/evm)' }),
-      credentialName: z.string().default('Boros Agent').meta({ displayName: 'Name for the new credential' }),
-      accountId: z.coerce.number().int().min(0).default(0).meta({ displayName: 'Sub-account id' }),
-      expiryDays: z.coerce.number().int().min(1).max(365).default(180).meta({ displayName: 'Agent validity (days)' }),
+      rootCredential: z.string().meta({ displayName: 'Root wallet credential (web3/evm)', i18n: { 'zh-CN': { displayName: '根钱包凭证（web3/evm）' } } }),
+      credentialName: z.string().default('Boros Agent').meta({ displayName: 'Name for the new credential', i18n: { 'zh-CN': { displayName: '新凭证的名称' } } }),
+      accountId: z.coerce.number().int().min(0).default(0).meta({ displayName: 'Sub-account id', i18n: { 'zh-CN': { displayName: '子账户 id' } } }),
+      expiryDays: z.coerce.number().int().min(1).max(365).default(180).meta({ displayName: 'Agent validity (days)', i18n: { 'zh-CN': { displayName: '代理有效期（天）' } } }),
     }),
     paramOptions: async () => {
       const infos = await credentials.list()
@@ -435,13 +435,13 @@ export async function scanMakerIncentives(input: MakerScanInput): Promise<MakerS
 
 export const scanIncentivesScript: ScriptDefinition = {
   id: 'scan-incentives',
-  name: 'Scan maker incentives',
-  description: 'Rank Boros markets with a live maker-incentive budget by what a given capital would earn resting at the band edge, and spell out the best pick with its strategy parameters.',
+  name: { en: 'Scan maker incentives', 'zh-CN': '扫描做市激励' },
+  description: { en: 'Rank Boros markets with a live maker-incentive budget by what a given capital would earn resting at the band edge, and spell out the best pick with its strategy parameters.', 'zh-CN': '把有做市激励预算的 Boros 市场按给定资金挂在区间边缘能赚多少排序，并给出最佳选择及其策略参数。' },
   paramsSchema: z.object({
-    capitalUsd: z.coerce.number().positive().default(1000).meta({ displayName: 'Capital (USD)', description: 'Collateral you would deposit into the chosen market. Sized into orders through the venue\'s own margin requirement.' }),
-    sides: z.enum(['both', 'long', 'short']).default('both').meta({ displayName: 'Sides', description: 'both splits the capital across the two sides (each needs its own margin); a single side puts it all on one.' }),
-    marginUse: z.coerce.number().min(0.1).max(1).default(0.8).meta({ displayName: 'Margin use', description: 'Fraction of the capital committed as order margin; the rest stays as buffer against a fill and rate moves.' }),
-    edgeRatio: z.coerce.number().min(0.5).max(1).default(0.95).meta({ displayName: 'Edge ratio', description: 'Where the order rests as a fraction of the band half-width — mirror the strategy\'s value.' }),
+    capitalUsd: z.coerce.number().positive().default(1000).meta({ displayName: 'Capital (USD)', description: 'Collateral you would deposit into the chosen market. Sized into orders through the venue\'s own margin requirement.', i18n: { 'zh-CN': { displayName: '资金（USD）', description: '你会存入所选市场的抵押品。按交易所自己的保证金要求折算成订单规模。' } } }),
+    sides: z.enum(['both', 'long', 'short']).default('both').meta({ displayName: 'Sides', description: 'both splits the capital across the two sides (each needs its own margin); a single side puts it all on one.', i18n: { 'zh-CN': { displayName: '方向', description: 'both 把资金分到两边（每边各需保证金）；单边则全部放到一边。' } } }),
+    marginUse: z.coerce.number().min(0.1).max(1).default(0.8).meta({ displayName: 'Margin use', description: 'Fraction of the capital committed as order margin; the rest stays as buffer against a fill and rate moves.', i18n: { 'zh-CN': { displayName: '保证金使用率', description: '资金中用作订单保证金的比例；其余作为成交和利率波动的缓冲。' } } }),
+    edgeRatio: z.coerce.number().min(0.5).max(1).default(0.95).meta({ displayName: 'Edge ratio', description: 'Where the order rests as a fraction of the band half-width — mirror the strategy\'s value.', i18n: { 'zh-CN': { displayName: '边缘比例', description: '订单挂在区间半宽的哪个比例——与策略的值保持一致。' } } }),
   }),
   run: async ({ params, emit, signal }) => {
     const capitalUsd = Number(params['capitalUsd'] ?? 1000)

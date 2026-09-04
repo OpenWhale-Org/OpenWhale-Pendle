@@ -15,7 +15,7 @@ export const marketWatchSchema = z.object({
   tokenId: z.number(),
   symbol: z.string(),
   ts: z.number(),
-  midApr: z.number().meta({ description: 'Decimal, 0.068 = 6.8%' }),
+  midApr: z.number().meta({ description: 'Decimal, 0.068 = 6.8%', i18n: { 'zh-CN': { description: '小数，0.068 = 6.8%' } } }),
   markApr: z.number(),
   bestBid: z.number().optional(),
   bestAsk: z.number().optional(),
@@ -33,8 +33,8 @@ export const marketWatchSchema = z.object({
 export type MarketWatchSample = z.infer<typeof marketWatchSchema>
 
 export const marketWatchParamsSchema = z.object({
-  pollIntervalMs: z.number().int().min(2_000).default(10_000).meta({ displayName: 'Poll Interval (ms)' }),
-  campaignRefreshMs: z.number().int().min(10_000).default(60_000).meta({ displayName: 'Campaign Refresh (ms)', description: 'How often the incentive band/budget is re-read (it changes hourly at most)' }),
+  pollIntervalMs: z.number().int().min(2_000).default(10_000).meta({ displayName: 'Poll Interval (ms)', i18n: { 'zh-CN': { displayName: '轮询间隔（毫秒）' } } }),
+  campaignRefreshMs: z.number().int().min(10_000).default(60_000).meta({ displayName: 'Campaign Refresh (ms)', description: 'How often the incentive band/budget is re-read (it changes hourly at most)', i18n: { 'zh-CN': { displayName: '活动刷新间隔（毫秒）', description: '多久重读一次激励区间/预算（最多每小时变一次）' } } }),
 })
 export type MarketWatchOptions = Partial<z.infer<typeof marketWatchParamsSchema>>
 
@@ -77,7 +77,7 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
         displayName: 'Boros market',
         placeholder: 'BINANCE-BTCUSDT-25SEP2026',
         description: 'The Boros market symbol (as listed on the venue). Run pendle/scan-incentives to see live markets and budgets.',
-        catalogue: { source: 'market', kind: 'pendle/rates' },
+        catalogue: { source: 'market', kind: 'pendle/rates' }, i18n: { 'zh-CN': { displayName: 'Boros 市场', description: 'Boros 市场符号（按交易所列表）。运行 pendle/scan-incentives 查看在线市场与预算。' } }
       }),
     })
   }
@@ -88,24 +88,24 @@ export class MarketWatchMonitor extends BaseMonitor<string, MarketWatchSample> {
     return [
       {
         id: 'apr',
-        title: 'Mid APR and the incentive band',
+        title: { en: 'Mid APR and the incentive band', 'zh-CN': '中间年化与激励区间' },
         kind: 'line',
         unit: '%',
-        description: 'Mid implied APR with the band edges the maker orders rest at',
+        description: { en: 'Mid implied APR with the band edges the maker orders rest at', 'zh-CN': '中间隐含年化，以及 maker 订单所挂的区间边缘' },
         extract: (records: MonitorRecord<MarketWatchSample>[]) => [
           { label: 'mid', points: records.map(r => ({ x: r.ts, y: r.data.midApr * 100 })) },
-          { label: 'long edge', points: records.map(r => ({ x: r.ts, y: (r.data.midApr - r.data.band.long.range) * 100 })) },
-          { label: 'short edge', points: records.map(r => ({ x: r.ts, y: (r.data.midApr + r.data.band.short.range) * 100 })) },
+          { label: { en: 'long edge', 'zh-CN': '多头边缘' }, points: records.map(r => ({ x: r.ts, y: (r.data.midApr - r.data.band.long.range) * 100 })) },
+          { label: { en: 'short edge', 'zh-CN': '空头边缘' }, points: records.map(r => ({ x: r.ts, y: (r.data.midApr + r.data.band.short.range) * 100 })) },
         ],
       },
       {
         id: 'pool',
-        title: 'In-band pool per side (YU)',
+        title: { en: 'In-band pool per side (YU)', 'zh-CN': '区间内各方向的池子（YU）' },
         kind: 'line',
-        description: 'The liquidity the hourly budget is shared with — smaller is better for us',
+        description: { en: 'The liquidity the hourly budget is shared with — smaller is better for us', 'zh-CN': '与每小时预算共享的流动性——越小对我们越好' },
         extract: (records: MonitorRecord<MarketWatchSample>[]) => [
-          { label: 'long pool', points: records.map(r => ({ x: r.ts, y: r.data.band.long.poolYu })) },
-          { label: 'short pool', points: records.map(r => ({ x: r.ts, y: r.data.band.short.poolYu })) },
+          { label: { en: 'long pool', 'zh-CN': '多头池' }, points: records.map(r => ({ x: r.ts, y: r.data.band.long.poolYu })) },
+          { label: { en: 'short pool', 'zh-CN': '空头池' }, points: records.map(r => ({ x: r.ts, y: r.data.band.short.poolYu })) },
         ],
       },
     ]

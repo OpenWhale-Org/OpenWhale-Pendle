@@ -56,8 +56,8 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
       {
         id: 'market-watch',
         contract: 'market-watch',
-        displayName: 'Boros market watch',
-        description: 'One Boros market\'s maker picture every few seconds: mid/mark APR, the incentive band and budget per side, the pool we share it with, and the size already resting in band. Key: market id.',
+        displayName: { en: 'Boros market watch', 'zh-CN': 'Boros 市场监视' },
+        description: { en: 'One Boros market\'s maker picture every few seconds: mid/mark APR, the incentive band and budget per side, the pool we share it with, and the size already resting in band. Key: market id.', 'zh-CN': '每隔几秒给出一个 Boros 市场的做市全貌：中间/标记年化、各方向的激励区间与预算、我们共享的池子，以及已挂出的规模。' },
         // Every key of this monitor is a Boros market, and the key has no venue
         // field for the dashboard to read — declaring the pin is what lets its
         // market picker list anything instead of asking for a typed symbol.
@@ -70,8 +70,8 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
       {
         definition: {
           id: 'maker',
-          name: 'Boros Maker Executor',
-          description: 'Idempotent requote / quote / cancel / flatten over one Boros account. requote cancels and re-rests any number of sides in ONE relayed transaction; flatten IOCs the deviation after an accidental fill. simulate* variants log without sending.',
+          name: { en: 'Boros Maker Executor', 'zh-CN': 'Boros 做市执行器' },
+          description: { en: 'Idempotent requote / quote / cancel / flatten over one Boros account. requote cancels and re-rests any number of sides in ONE relayed transaction; flatten IOCs the deviation after an accidental fill. simulate* variants log without sending.', 'zh-CN': '对一个 Boros 账户的幂等 requote / quote / cancel / flatten。requote 在一笔中继交易里撤销并重挂任意方向；flatten 以 IOC 平掉意外成交。' },
           source: 'plugin',
           pluginName: 'pendle-strategy',
           supportedActions: ['requote', 'quote', 'cancel', 'flatten', 'simulateRequote', 'simulateQuote', 'simulateCancel', 'simulateFlatten'],
@@ -85,8 +85,8 @@ export const pendleMakerPlugin: PluginFactory = (): OpenWhalePlugin => {
       {
         definition: {
           id: 'boros-maker',
-          name: 'Boros Maker Rewards',
-          description: 'Rests post-only orders at the far edge of the Boros maker-incentive band on both sides and follows the band as mid moves; an accidental fill is flattened at once; one instance per market; starts in dry run.',
+          name: { en: 'Boros Maker Rewards', 'zh-CN': 'Boros 做市奖励' },
+          description: { en: 'Rests post-only orders at the far edge of the Boros maker-incentive band on both sides and follows the band as mid moves; an accidental fill is flattened at once; one instance per market; starts in dry run.', 'zh-CN': '在 Boros 做市激励区间的远端边缘双边挂 post-only 单，随中间价移动跟随区间；意外成交会被平掉。' },
           source: 'plugin',
           pluginName: 'pendle-strategy',
           accountRequirements: [{ label: 'boros', kind: 'pendle/rates' }],
